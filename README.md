@@ -31,7 +31,14 @@ npm run dev
 
 The Supabase variables may be left blank to start. With no credentials the app
 falls back to a file-backed store in `.data/`, so the whole UI is runnable
-locally. That fallback refuses to start when `NODE_ENV=production`.
+locally.
+
+That fallback refuses to run when `NODE_ENV=production`, because it keeps state
+on local disk: on a serverless platform each instance gets its own copy and a
+redeploy wipes it. A deployment with nothing configured shows a setup screen
+naming the missing variables rather than erroring on every route. For a
+throwaway demo with no database, `ALLOW_DEV_STORE=true` opts into the file store
+knowingly — never use it for real leads.
 
 Open http://localhost:3000.
 

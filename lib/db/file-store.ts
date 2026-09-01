@@ -39,8 +39,8 @@ import type {
  *
  * This is NOT a production store. It has no real concurrency control beyond a
  * single-process write queue, and a serverless deployment would give every
- * instance its own copy. `assertDevelopment` below makes that failure loud
- * rather than silent.
+ * instance its own copy of the file. `assertUsable` below makes that failure
+ * loud rather than silent, unless ALLOW_DEV_STORE=true opts into it knowingly.
  */
 
 interface Database {
@@ -68,12 +68,16 @@ function seedDatabase(): Database {
   };
 }
 
-function assertDevelopment(): void {
-  if (process.env.NODE_ENV === "production") {
+function assertUsable(): void {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_DEV_STORE !== "true"
+  ) {
     throw new Error(
       "The file-backed development store cannot run in production. " +
         "Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and " +
-        "SUPABASE_SERVICE_ROLE_KEY to use the Supabase store.",
+        "SUPABASE_SERVICE_ROLE_KEY to use the Supabase store, or set " +
+        "ALLOW_DEV_STORE=true to accept ephemeral local disk.",
     );
   }
 }
@@ -88,20 +92,51 @@ const globalForStore = globalThis as unknown as {
 };
 
 async function load(): Promise<Database> {
+  let raw: string;
   try {
-    const raw = await readFile(DATA_FILE, "utf8");
+    raw = await readFile(DATA_FILE, "utf8");
+  } catch (error) {
+    /*
+     * Seed ONLY when the file genuinely does not exist. Treating every read
+     * failure as "no database yet" would persist a fresh seed over a file that
+     * was merely locked, permission-denied, or half-written, destroying every
+     * locally created lead, comment and message.
+     */
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      const seeded = seedDatabase();
+      await persist(seeded);
+      return seeded;
+    }
+    throw error;
+  }
+
+  try {
     return JSON.parse(raw) as Database;
   } catch {
-    // No file yet (or an unreadable one) means a fresh seeded database.
-    const seeded = seedDatabase();
-    await persist(seeded);
-    return seeded;
+    // Corrupt JSON is a problem to surface, never something to overwrite.
+    throw new Error(
+      `${DATA_FILE} is not valid JSON. Inspect or delete it — deleting reseeds ` +
+        `from lib/db/seed.ts and loses any locally created data.`,
+    );
   }
 }
 
 function db(): Promise<Database> {
-  globalForStore.__leadHubDb ??= load();
-  return globalForStore.__leadHubDb;
+  const cached = globalForStore.__leadHubDb;
+  if (cached) return cached;
+
+  const pending = load();
+  globalForStore.__leadHubDb = pending;
+  /*
+   * Drop a rejected promise from the cache, otherwise one transient read
+   * failure is memoised and every later request fails with the same error.
+   */
+  pending.catch(() => {
+    if (globalForStore.__leadHubDb === pending) {
+      globalForStore.__leadHubDb = undefined;
+    }
+  });
+  return pending;
 }
 
 async function persist(data: Database): Promise<void> {
@@ -129,7 +164,7 @@ function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 async function mutate<T>(fn: (data: Database) => T | Promise<T>): Promise<T> {
-  assertDevelopment();
+  assertUsable();
   return withWriteLock(async () => {
     const data = await db();
     const result = await fn(data);
@@ -139,7 +174,7 @@ async function mutate<T>(fn: (data: Database) => T | Promise<T>): Promise<T> {
 }
 
 async function read<T>(fn: (data: Database) => T): Promise<T> {
-  assertDevelopment();
+  assertUsable();
   return fn(await db());
 }
 
