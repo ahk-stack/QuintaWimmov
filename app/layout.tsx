@@ -2,18 +2,26 @@ import type { Metadata, Viewport } from "next";
 import { Caladea, Lato } from "next/font/google";
 import "./globals.css";
 
-/* Caladea and Lato are static families, so explicit weights are required. */
+/*
+ * Caladea and Lato are static families, so weights are explicit. Only the
+ * weights actually used are declared — every extra one is a preloaded font file
+ * the browser fetches and never paints. latin-ext stays because the roster and
+ * hotel names carry accented characters.
+ *
+ * Caladea ships Bold only here: the brand specifies Caladea Bold for headings,
+ * and headings are the sole place it is used.
+ */
 const caladea = Caladea({
   variable: "--font-caladea",
   subsets: ["latin", "latin-ext"],
-  weight: ["400", "700"],
+  weight: ["700"],
   display: "swap",
 });
 
 const lato = Lato({
   variable: "--font-lato",
   subsets: ["latin", "latin-ext"],
-  weight: ["300", "400", "700", "900"],
+  weight: ["400", "700"],
   display: "swap",
 });
 
