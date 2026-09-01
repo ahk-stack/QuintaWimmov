@@ -230,6 +230,21 @@ function fail(operation: string): never {
   throw new Error(`Supabase ${operation} failed`);
 }
 
+/** Postgres: invalid input syntax for type — e.g. a non-UUID in a uuid column. */
+const INVALID_TEXT_REPRESENTATION = "22P02";
+
+/**
+ * True when a lookup failed because the id could not be a uuid at all.
+ *
+ * Such an id cannot match any row, so the honest answer is "not found" rather
+ * than an error. Without this, `/leads/anything` returns 500 on a URL anyone can
+ * reach, and an API call carrying a malformed person id gets a 500 instead of
+ * the 400 the handler is written to return.
+ */
+function isUnmatchableId(error: { code?: string } | null): boolean {
+  return error?.code === INVALID_TEXT_REPRESENTATION;
+}
+
 // Store -----------------------------------------------------------------------
 
 export const supabaseStore: DataStore = {
@@ -248,7 +263,10 @@ export const supabaseStore: DataStore = {
       .select("*")
       .eq("id", id)
       .maybeSingle();
-    if (error) fail("getPerson");
+    if (error) {
+      if (isUnmatchableId(error)) return null;
+      fail("getPerson");
+    }
     return data ? toPerson(data as PersonRow) : null;
   },
 
@@ -273,7 +291,10 @@ export const supabaseStore: DataStore = {
       .select("*")
       .eq("id", id)
       .maybeSingle();
-    if (error) fail("getLead");
+    if (error) {
+      if (isUnmatchableId(error)) return null;
+      fail("getLead");
+    }
     return data ? toLead(data as LeadRow) : null;
   },
 

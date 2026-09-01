@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ChatRoom } from "@/components/chat-room";
-import { getStore } from "@/lib/db";
+import { getStore, storeKind } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +11,14 @@ export async function generateMetadata({
 }: {
   params: Promise<{ slug: string }>;
 }) {
+  /*
+   * generateMetadata runs outside the route-group layout, so the layout's
+   * storeKind() guard does not protect it. Without this check an unconfigured
+   * deployment throws here and returns a 500, instead of the setup screen the
+   * guard exists to render.
+   */
+  if (storeKind() === "unconfigured") return { title: "Chat" };
+
   const { slug } = await params;
   const channel = await getStore().getChannelBySlug(slug);
   return { title: channel ? channel.name : "Channel not found" };
@@ -70,7 +78,16 @@ export default async function ChannelPage({
         rather than letting the page grow with the message list.
       */}
       <div className="flex h-[calc(100vh-16rem)] min-h-[28rem] flex-col">
+        {/*
+          Keyed by channel so switching channels mounts a fresh room.
+          Next remounts this segment on a param change today, so the messages,
+          draft and socket already reset — but relying on framework
+          reconciliation for that would be fragile, and one stale message list
+          bleeding into another channel is a bad failure. The key makes it
+          explicit and costs nothing.
+        */}
         <ChatRoom
+          key={channel.id}
           channel={channel}
           initialMessages={messages}
           people={people}
