@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/*
+ * Quinta Lead Hub — design tokens.
+ *
+ * The Quinta brand is deliberately monochrome: black and white only, with
+ * colour reserved for functional status. The brand guidelines carve out one
+ * exception we rely on here — "product screenshots or UI mockups may include
+ * necessary interface colours" — which is what the neutral line/surface tokens
+ * below are for. Keep them few and quiet; never introduce a decorative colour.
+ */
+@theme {
+  /* Typography — Caladea Bold for headings, Lato for body. No substitutions. */
+  --font-heading: var(--font-caladea), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-lato), system-ui, -apple-system, sans-serif;
+
+  /* The palette. */
+  --color-ink: #000000;
+  --color-paper: #ffffff;
+
+  /* Necessary interface neutrals — borders, hovers, secondary text. */
+  --color-line: #e4e4e4;
+  --color-line-strong: #c9c9c9;
+  --color-surface: #f7f7f7;
+  --color-muted: #616161;
+
+  /*
+   * Functional status system. These are the ONLY colours permitted beyond
+   * black and white, and only ever to communicate state — never decoration.
+   */
+  --color-status-won: #2e7d32;
+  --color-status-watch: #ef6c00;
+  --color-status-lost: #c62828;
+  --color-status-info: #1565c0;
+  --color-status-pending: #616161;
+}
+
+/*
+ * Light only. The brand permits black-on-white and white-on-black, but a
+ * half-inverted UI invites off-brand greys, so we commit to one ground.
+ */
+html {
+  color-scheme: only light;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+/* Visible keyboard focus everywhere — monochrome, so it must be unmissable. */
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
