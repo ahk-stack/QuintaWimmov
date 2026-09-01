@@ -5,7 +5,7 @@
       "name": "lead-hub",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000,
+      "port": 65050,
       "autoPort": true
     }
   ]
