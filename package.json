@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit",
+    "review": "codex review --base main",
+    "review:uncommitted": "codex review --uncommitted"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
