@@ -31,7 +31,14 @@ npm run dev
 
 The Supabase variables may be left blank to start. With no credentials the app
 falls back to a file-backed store in `.data/`, so the whole UI is runnable
-locally. That fallback refuses to start when `NODE_ENV=production`.
+locally.
+
+That fallback refuses to run when `NODE_ENV=production`, because it keeps state
+on local disk: on a serverless platform each instance gets its own copy and a
+redeploy wipes it. A deployment with nothing configured shows a setup screen
+naming the missing variables rather than erroring on every route. For a
+throwaway demo with no database, `ALLOW_DEV_STORE=true` opts into the file store
+knowingly — never use it for real leads.
 
 Open http://localhost:3000.
 
@@ -62,13 +69,35 @@ fully open, which is the current default and a deliberate choice.
 
 ## Code review
 
-Every change lands through a pull request reviewed by **Codex**, with
-[`AGENTS.md`](./AGENTS.md) supplying the repo-specific review rules — secret
-handling, RLS, PII in logs, and brand constraints.
+Every change is reviewed by **Codex** against the repo-specific rules in
+[`AGENTS.md`](./AGENTS.md) — secret handling, RLS, PII in logs, rate limiting and
+the brand constraints.
 
-One-time setup: at `chatgpt.com/codex/settings/code-review`, enable Code review
-for this repository and turn on **Automatic reviews**. `@codex review` on a pull
-request triggers a run on demand.
+### Reviewing locally (the path we use)
+
+Codex Cloud's GitHub integration needs a ChatGPT workspace admin to approve the
+GitHub connector, which we do not have. The CLI needs no such approval: it reads
+the repository off local disk and signs in with your ChatGPT account, so it uses
+the same Codex subscription without any GitHub link.
+
+```bash
+npm install -g @openai/codex
+codex login          # "Sign in with ChatGPT"; no GitHub connector involved
+npm run review       # reviews the current branch against main
+```
+
+`npm run review:uncommitted` reviews staged, unstaged and untracked changes
+before you commit. Codex picks up `AGENTS.md` on its own.
+
+### If the connector is approved later
+
+At `chatgpt.com/codex/settings/code-review`, enable Code review for the
+repository and turn on **Automatic reviews**, and every pull request is reviewed
+without anyone running a command. `@codex review` as a PR comment triggers a run
+on demand. Note that automatic reviews only fire on pull requests opened after
+the setting is enabled.
+
+### CI
 
 GitHub Actions covers what Codex should not spend attention on: typecheck, lint,
 build, `npm audit`, a gitleaks history scan, CodeQL with `security-extended`, and
