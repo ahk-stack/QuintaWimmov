@@ -95,6 +95,17 @@ for (const t of ["channels", "messages"]) {
 }
 
 // Seed a temporary person + lead so the RLS read test has something to hide.
+/*
+ * Record the baseline before touching anything. Asserting an empty table at the
+ * end would make this script unusable the moment the app holds real leads,
+ * which is exactly when verifying RLS matters most.
+ */
+const baselineLeads = await (async () => {
+  const { body } = await get("leads?select=id", SVC);
+  return Array.isArray(body) ? body.length : -1;
+})();
+console.log(`\nBaseline: ${baselineLeads} lead(s) already in the project`);
+
 console.log("\n4. Seeding a temporary lead (service_role) to test RLS properly");
 const personRes = await post("people", SVC, {
   name: "RLS Probe",
@@ -177,10 +188,11 @@ if (personId)
   check("person deleted", (await del(`people?id=eq.${personId}`, SVC)) < 300);
 {
   const { body } = await get("leads?select=id", SVC);
+  const now = Array.isArray(body) ? body.length : -1;
   check(
-    "leads table back to empty",
-    Array.isArray(body) && body.length === 0,
-    `${Array.isArray(body) ? body.length : "?"} row(s)`,
+    "lead count back to baseline (only the probe row removed)",
+    now === baselineLeads,
+    `${now} row(s), baseline was ${baselineLeads}`,
   );
 }
 

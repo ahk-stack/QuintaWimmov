@@ -101,8 +101,17 @@ function HubSpotPanel({ lead }: { lead: Lead }) {
           {formatDateTime(lead.hubspotSyncedAt)}
         </p>
       ) : null}
+      {/*
+        Never render hubspotSyncError verbatim. HubSpot rejection messages quote
+        the offending request, which for these calls means the prospect's email
+        or phone — and this page is reachable by anyone with the URL. The detail
+        stays server-side; the page says only that it failed.
+      */}
       {lead.hubspotSyncError ? (
-        <p className="mt-1 text-xs text-status-lost">{lead.hubspotSyncError}</p>
+        <p className="mt-1 text-xs text-status-lost">
+          The last push was rejected. An admin can find the reason in the server
+          logs.
+        </p>
       ) : null}
       <p className="mt-2 text-xs text-muted">
         Pushing accepted leads to HubSpot arrives in Phase 5.

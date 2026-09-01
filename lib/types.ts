@@ -62,6 +62,13 @@ export interface Lead {
   hubspotCompanyId: string | null;
   hubspotDealId: string | null;
   hubspotSyncedAt: string | null;
+  /**
+   * Diagnostic only, and never safe to render.
+   *
+   * HubSpot rejection messages quote the offending request, which for these
+   * calls means the prospect's email or phone. Any UI must show a generic
+   * failure instead, and whatever writes this must sanitise before storing.
+   */
   hubspotSyncError: string | null;
 }
 
