@@ -10,7 +10,7 @@ import {
   StatusPill,
   Tag,
 } from "@/components/ui";
-import { getStore } from "@/lib/db";
+import { getStore, storeKind } from "@/lib/db";
 import { displayHost, formatDate, formatDateTime } from "@/lib/format";
 import { DIRECTION_META, PRIORITY_META, STATUS_META } from "@/lib/status";
 import { hubspotSyncState } from "@/lib/types";
@@ -23,6 +23,9 @@ export async function generateMetadata({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // Same reason as the chat route: metadata runs outside the layout guard.
+  if (storeKind() === "unconfigured") return { title: "Lead" };
+
   const { id } = await params;
   const lead = await getStore().getLead(id);
   return { title: lead ? lead.hotelName : "Lead not found" };

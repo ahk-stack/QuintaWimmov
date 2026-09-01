@@ -45,6 +45,15 @@ by assumption.
 - Read policies for `anon` are only acceptable on `messages` and `channels`, and
   only for `SELECT`.
 
+### Route-level guards do not cover metadata
+- `generateMetadata` runs outside the route-group layout, so the `storeKind()`
+  check in `app/(hub)/layout.tsx` does not protect it. Any `generateMetadata`
+  that touches the store must bail out when `storeKind() === "unconfigured"`,
+  or an unconfigured deployment 500s instead of showing the setup screen.
+- A lookup by a malformed id must return "not found", not throw. Postgres
+  answers `22P02` for a non-UUID in a uuid column; treating that as an error
+  turns `/leads/<anything>` into a 500 on a URL anyone can reach.
+
 ### Contact data must not leak
 - Lead contact fields (`contact_name`, `contact_email`, `contact_phone`) must not
   appear in `console.*` output, thrown error messages that reach the browser, or
