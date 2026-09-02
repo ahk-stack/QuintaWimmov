@@ -46,10 +46,29 @@ export async function POST(request: Request) {
      * or delete a name afterwards, and a client-supplied list could name anyone.
      */
     const people = await store.listPeople();
-    const message = await store.createMessage({
-      ...parsed.data,
-      mentions: findMentions(parsed.data.body, people),
-    });
+    const mentions = findMentions(parsed.data.body, people);
+    const message = await store.createMessage({ ...parsed.data, mentions });
+
+    /*
+     * Notify the people mentioned, never the author. Being told you tagged
+     * yourself is noise, and it would leave a badge nobody can explain.
+     */
+    const recipients = mentions.filter((id) => id !== parsed.data.authorId);
+    if (recipients.length > 0) {
+      const channelSlug =
+        channels.find((c) => c.id === parsed.data.channelId)?.slug ?? "";
+      await store.createNotifications(
+        recipients.map((personId) => ({
+          personId,
+          kind: "mention" as const,
+          actorId: parsed.data.authorId,
+          sourceId: message.id,
+          href: `/chat/${channelSlug}`,
+          preview: parsed.data.body.slice(0, 160),
+        })),
+      );
+    }
+
     return Response.json({ id: message.id }, { status: 201 });
   } catch {
     return Response.json(

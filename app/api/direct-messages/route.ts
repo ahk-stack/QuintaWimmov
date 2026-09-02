@@ -61,6 +61,24 @@ export async function POST(request: Request) {
       recipientId,
       body,
     });
+
+    /*
+     * The preview quotes the message. That is the same sensitivity as the
+     * message itself, and `notifications` has no anon access for exactly that
+     * reason — see migration 0005.
+     */
+    await store.createNotifications([
+      {
+        personId: recipientId,
+        kind: "direct_message",
+        actorId: senderId,
+        sourceId: message.id,
+        // Points at the thread with the SENDER, which is where the reply goes.
+        href: `/chat/direct/${senderId}`,
+        preview: body.slice(0, 160),
+      },
+    ]);
+
     return Response.json({ id: message.id }, { status: 201 });
   } catch {
     return Response.json(

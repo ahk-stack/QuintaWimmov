@@ -1,4 +1,5 @@
 import type {
+  AppNotification,
   Channel,
   Conversation,
   DirectMessage,
@@ -75,6 +76,15 @@ export interface NewNews {
   pinned?: boolean;
 }
 
+export interface NewNotification {
+  personId: string;
+  kind: AppNotification["kind"];
+  actorId: string | null;
+  sourceId: string;
+  href: string;
+  preview?: string | null;
+}
+
 export interface HubSpotResult {
   contactId?: string | null;
   companyId?: string | null;
@@ -138,6 +148,24 @@ export interface DataStore {
     recipientId: string;
     body: string;
   }): Promise<DirectMessage>;
+
+  // Notifications -----------------------------------------------------------
+  /**
+   * Records notifications. Server-side only, and the caller is responsible for
+   * never notifying someone about their own action.
+   */
+  createNotifications(inputs: NewNotification[]): Promise<void>;
+  /** Unread notifications for one person, newest first. */
+  listUnreadNotifications(
+    personId: string,
+    limit?: number,
+  ): Promise<AppNotification[]>;
+  /**
+   * Marks notifications read. With no ids, marks all of this person's unread
+   * ones. `personId` is always applied, so a caller cannot mark someone
+   * else's notifications by passing their ids.
+   */
+  markNotificationsRead(personId: string, ids?: string[]): Promise<number>;
 
   // News --------------------------------------------------------------------
   listNews(limit?: number): Promise<NewsItem[]>;

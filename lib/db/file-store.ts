@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  AppNotification,
   Channel,
   DirectMessage,
   Lead,
@@ -53,6 +54,7 @@ interface Database {
   channels: Channel[];
   messages: Message[];
   directMessages: DirectMessage[];
+  notifications: AppNotification[];
   news: NewsItem[];
 }
 
@@ -70,6 +72,7 @@ function seedDatabase(): Database {
     // No seeded direct messages: inventing private-looking chatter between real
     // named people would be worse than an empty inbox.
     directMessages: [],
+    notifications: [],
     news: structuredClone(SEED_NEWS),
   };
 }
@@ -436,6 +439,50 @@ export const fileStore: DataStore = {
       };
       d.directMessages.push(message);
       return message;
+    });
+  },
+
+  async createNotifications(inputs) {
+    if (inputs.length === 0) return;
+    await mutate((d) => {
+      const now = new Date().toISOString();
+      for (const input of inputs) {
+        d.notifications.push({
+          id: randomUUID(),
+          personId: input.personId,
+          kind: input.kind,
+          actorId: input.actorId,
+          sourceId: input.sourceId,
+          href: input.href,
+          preview: input.preview ?? null,
+          createdAt: now,
+          readAt: null,
+        });
+      }
+    });
+  },
+
+  async listUnreadNotifications(personId, limit = 30) {
+    return read((d) =>
+      d.notifications
+        .filter((n) => n.personId === personId && n.readAt === null)
+        .sort(newest)
+        .slice(0, limit),
+    );
+  },
+
+  async markNotificationsRead(personId, ids) {
+    return mutate((d) => {
+      const now = new Date().toISOString();
+      let changed = 0;
+      for (const n of d.notifications) {
+        // personId is always applied, so ids from another person are ignored.
+        if (n.personId !== personId || n.readAt !== null) continue;
+        if (ids && !ids.includes(n.id)) continue;
+        n.readAt = now;
+        changed++;
+      }
+      return changed;
     });
   },
 

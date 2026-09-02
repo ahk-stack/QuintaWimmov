@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Person } from "@/lib/types";
 
 import { IdentityMenu, IdentityPrompt, IdentityProvider } from "./identity";
+import { NotificationBell, type BellItem } from "./notification-bell";
 import { NavLink } from "./nav-link";
 
 const NAV = [
@@ -20,9 +21,12 @@ const NAV = [
  */
 export function AppShell({
   people,
+  initialNotifications,
   children,
 }: {
   people: Person[];
+  /** Seeded server-side from the identity cookie; see NotificationBell. */
+  initialNotifications: BellItem[];
   children: React.ReactNode;
 }) {
   return (
@@ -60,9 +64,10 @@ export function AppShell({
             ))}
           </nav>
 
-          {/* ml-auto pins the control right on the wrapped mobile row, where
-              the nav is no longer between it and the logo. */}
-          <div className="ml-auto sm:ml-0">
+          {/* ml-auto pins the controls right on the wrapped mobile row, where
+              the nav is no longer between them and the logo. */}
+          <div className="ml-auto flex items-center gap-1 sm:ml-0">
+            <NotificationBell people={people} initialItems={initialNotifications} />
             <IdentityMenu />
           </div>
         </div>

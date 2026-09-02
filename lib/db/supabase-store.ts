@@ -3,6 +3,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import type {
+  AppNotification,
   Channel,
   Conversation,
   DirectMessage,
@@ -108,6 +109,18 @@ interface MessageRow {
   mentions: string[] | null;
 }
 
+interface NotificationRow {
+  id: string;
+  person_id: string;
+  kind: AppNotification["kind"];
+  actor_id: string | null;
+  source_id: string;
+  href: string;
+  preview: string | null;
+  created_at: string;
+  read_at: string | null;
+}
+
 interface DirectMessageRow {
   id: string;
   sender_id: string;
@@ -200,6 +213,18 @@ const toMessage = (r: MessageRow): Message => ({
   editedAt: r.edited_at,
   // Older rows predate the column; the default is '{}' but be defensive.
   mentions: r.mentions ?? [],
+});
+
+const toNotification = (r: NotificationRow): AppNotification => ({
+  id: r.id,
+  personId: r.person_id,
+  kind: r.kind,
+  actorId: r.actor_id,
+  sourceId: r.source_id,
+  href: r.href,
+  preview: r.preview,
+  createdAt: r.created_at,
+  readAt: r.read_at,
 });
 
 const toDirectMessage = (r: DirectMessageRow): DirectMessage => ({
@@ -595,6 +620,61 @@ export const supabaseStore: DataStore = {
       .single();
     if (error) fail("createDirectMessage");
     return toDirectMessage(data as DirectMessageRow);
+  },
+
+  async createNotifications(inputs) {
+    if (inputs.length === 0) return;
+    const { error } = await client()
+      .from("notifications")
+      .insert(
+        inputs.map((n) => ({
+          person_id: n.personId,
+          kind: n.kind,
+          actor_id: n.actorId,
+          source_id: n.sourceId,
+          href: n.href,
+          preview: n.preview ?? null,
+        })),
+      );
+    /*
+     * A failed notification must not fail the message that caused it. Someone
+     * losing a bell badge is a far smaller problem than their message not
+     * sending, so this is swallowed rather than thrown.
+     */
+    if (error) console.warn("notification insert failed");
+  },
+
+  async listUnreadNotifications(personId, limit = 30) {
+    const { data, error } = await client()
+      .from("notifications")
+      .select("*")
+      .eq("person_id", personId)
+      .is("read_at", null)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) {
+      if (isUnmatchableId(error)) return [];
+      fail("listUnreadNotifications");
+    }
+    return (data as NotificationRow[]).map(toNotification);
+  },
+
+  async markNotificationsRead(personId, ids) {
+    let query = client()
+      .from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      // Always scoped to this person, so ids belonging to someone else are a
+      // no-op rather than a way to clear their bell.
+      .eq("person_id", personId)
+      .is("read_at", null);
+    if (ids && ids.length > 0) query = query.in("id", ids);
+
+    const { data, error } = await query.select("id");
+    if (error) {
+      if (isUnmatchableId(error)) return 0;
+      fail("markNotificationsRead");
+    }
+    return (data as { id: string }[]).length;
   },
 
   async listNews(limit) {

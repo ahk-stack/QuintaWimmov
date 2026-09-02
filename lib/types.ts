@@ -125,6 +125,27 @@ export interface DirectMessage {
   createdAt: string;
 }
 
+export type NotificationKind = "mention" | "direct_message";
+
+/**
+ * Something that should light up the bell.
+ *
+ * `href` and `preview` are captured at write time so rendering the dropdown
+ * needs no further lookups, and so a later rename or edit does not change what
+ * the notification said when it arrived.
+ */
+export interface AppNotification {
+  id: string;
+  personId: string;
+  kind: NotificationKind;
+  actorId: string | null;
+  sourceId: string;
+  href: string;
+  preview: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
 /** One row in the direct-message sidebar. */
 export interface Conversation {
   /** The other participant, from the point of view of whoever is looking. */

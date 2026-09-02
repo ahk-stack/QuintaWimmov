@@ -1,5 +1,7 @@
 import { AppShell } from "@/components/app-shell";
+import type { BellItem } from "@/components/notification-bell";
 import { SetupRequired } from "@/components/setup-required";
+import { getClaimedPersonId } from "@/lib/current-person";
 import { getStore, storeKind } from "@/lib/db";
 
 /*
@@ -24,6 +26,31 @@ export default async function HubLayout({
     return <SetupRequired />;
   }
 
-  const people = await getStore().listPeople();
-  return <AppShell people={people}>{children}</AppShell>;
+  const store = getStore();
+  const [people, claimedId] = await Promise.all([
+    store.listPeople(),
+    // Attribution only — decides what to show, never what to allow.
+    getClaimedPersonId(),
+  ]);
+
+  /*
+   * Seeded here so the bell's badge is correct on first paint rather than
+   * flashing empty, and so its polling effect stays a pure subscription.
+   */
+  const notifications: BellItem[] = claimedId
+    ? (await store.listUnreadNotifications(claimedId)).map((n) => ({
+        id: n.id,
+        kind: n.kind,
+        actorId: n.actorId,
+        href: n.href,
+        preview: n.preview,
+        createdAt: n.createdAt,
+      }))
+    : [];
+
+  return (
+    <AppShell people={people} initialNotifications={notifications}>
+      {children}
+    </AppShell>
+  );
 }
