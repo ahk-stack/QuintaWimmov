@@ -199,8 +199,22 @@ export function ChatRoom({
                   {group.items.map((message) => {
                     const author = peopleById.get(message.authorId) ?? null;
                     const mine = current?.id === message.authorId;
+                    /*
+                     * Taken from the stored ids, not from the text, so a
+                     * message still counts as mentioning you after a rename.
+                     */
+                    const mentionsMe = Boolean(
+                      current && message.mentions.includes(current.id),
+                    );
                     return (
-                      <li key={message.id} className="flex gap-3">
+                      <li
+                        key={message.id}
+                        className={`flex gap-3 ${
+                          mentionsMe
+                            ? "-ml-4 border-l-2 border-ink pl-[0.875rem]"
+                            : ""
+                        }`}
+                      >
                         <Avatar person={author} size="sm" />
                         <div className="min-w-0 flex-1">
                           <p className="text-xs">
@@ -214,6 +228,11 @@ export function ChatRoom({
                               {" · "}
                               {formatTime(message.createdAt)}
                             </span>
+                            {mentionsMe ? (
+                              <span className="ml-2 font-bold">
+                                mentions you
+                              </span>
+                            ) : null}
                           </p>
                           <MessageBody
                             body={message.body}

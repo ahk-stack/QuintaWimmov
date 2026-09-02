@@ -6,13 +6,18 @@ import type { Person } from "@/lib/types";
 /**
  * Renders a message body with @mentions highlighted.
  *
- * Segments are rendered as text nodes, never as HTML, so a body cannot inject
- * markup no matter what someone types.
+ * Two separate jobs, deliberately kept apart:
  *
- * A mention of the reader is emphasised more strongly than a mention of someone
- * else — the point of a mention is that you can find the ones aimed at you.
- * Monochrome, so that emphasis is weight and a filled background rather than
- * colour.
+ * - WHETHER a message mentions someone is decided by the CALLER, from the
+ *   `mentions` ids recorded at send time. That survives a rename or a roster
+ *   removal, and is what drives the "mentions you" marker on the row.
+ * - WHERE to draw the inline highlight is decided here, by parsing the text
+ *   against the current roster — the stored ids say who was mentioned, not
+ *   which characters to mark. After a rename the old spelling stops matching
+ *   and loses its highlight, while the row still reports the mention.
+ *
+ * Segments render as text nodes, never HTML, so a body cannot inject markup.
+ * Emphasis is weight and a filled background, never colour.
  */
 export function MessageBody({
   body,
