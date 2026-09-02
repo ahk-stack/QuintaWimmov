@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  AppNotification,
   Channel,
   DirectMessage,
   Lead,
@@ -53,6 +54,7 @@ interface Database {
   channels: Channel[];
   messages: Message[];
   directMessages: DirectMessage[];
+  notifications: AppNotification[];
   news: NewsItem[];
 }
 
@@ -70,6 +72,7 @@ function seedDatabase(): Database {
     // No seeded direct messages: inventing private-looking chatter between real
     // named people would be worse than an empty inbox.
     directMessages: [],
+    notifications: [],
     news: structuredClone(SEED_NEWS),
   };
 }
@@ -97,6 +100,35 @@ const globalForStore = globalThis as unknown as {
   __leadHubWriteQueue?: Promise<unknown>;
 };
 
+/**
+ * Fills in collections a stored database predates.
+ *
+ * A .data/db.json written before a collection existed has no key for it, and
+ * `JSON.parse` returns that object verbatim — so the first read would call
+ * `.filter` on undefined and the first write would `.push` onto undefined.
+ * Deleting the file would fix it at the cost of every locally created record.
+ *
+ * Written out field by field on purpose: adding a collection to `Database`
+ * makes this a compile error until it is handled here, so the same trap cannot
+ * be reintroduced silently.
+ */
+function normalise(parsed: Partial<Database>): Database {
+  const asList = <T>(value: unknown): T[] =>
+    Array.isArray(value) ? (value as T[]) : [];
+
+  return {
+    people: asList<Person>(parsed.people),
+    leads: asList<Lead>(parsed.leads),
+    leadEvents: asList<LeadEvent>(parsed.leadEvents),
+    leadComments: asList<LeadComment>(parsed.leadComments),
+    channels: asList<Channel>(parsed.channels),
+    messages: asList<Message>(parsed.messages),
+    directMessages: asList<DirectMessage>(parsed.directMessages),
+    notifications: asList<AppNotification>(parsed.notifications),
+    news: asList<NewsItem>(parsed.news),
+  };
+}
+
 async function load(): Promise<Database> {
   let raw: string;
   try {
@@ -117,7 +149,7 @@ async function load(): Promise<Database> {
   }
 
   try {
-    return JSON.parse(raw) as Database;
+    return normalise(JSON.parse(raw) as Partial<Database>);
   } catch {
     // Corrupt JSON is a problem to surface, never something to overwrite.
     throw new Error(
@@ -436,6 +468,50 @@ export const fileStore: DataStore = {
       };
       d.directMessages.push(message);
       return message;
+    });
+  },
+
+  async createNotifications(inputs) {
+    if (inputs.length === 0) return;
+    await mutate((d) => {
+      const now = new Date().toISOString();
+      for (const input of inputs) {
+        d.notifications.push({
+          id: randomUUID(),
+          personId: input.personId,
+          kind: input.kind,
+          actorId: input.actorId,
+          sourceId: input.sourceId,
+          href: input.href,
+          preview: input.preview ?? null,
+          createdAt: now,
+          readAt: null,
+        });
+      }
+    });
+  },
+
+  async listUnreadNotifications(personId, limit = 30) {
+    return read((d) =>
+      d.notifications
+        .filter((n) => n.personId === personId && n.readAt === null)
+        .sort(newest)
+        .slice(0, limit),
+    );
+  },
+
+  async markNotificationsRead(personId, ids) {
+    return mutate((d) => {
+      const now = new Date().toISOString();
+      let changed = 0;
+      for (const n of d.notifications) {
+        // personId is always applied, so ids from another person are ignored.
+        if (n.personId !== personId || n.readAt !== null) continue;
+        if (ids && !ids.includes(n.id)) continue;
+        n.readAt = now;
+        changed++;
+      }
+      return changed;
     });
   },
 
