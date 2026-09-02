@@ -45,6 +45,7 @@ const KIND_LABEL: Record<NotificationKind, string> = {
 export function NotificationBell({
   people,
   initialItems,
+  initialOwnerId,
 }: {
   people: Person[];
   /**
@@ -53,10 +54,25 @@ export function NotificationBell({
    * pure subscription, with no state written during the effect body.
    */
   initialItems: BellItem[];
+  /** Who those items belong to, per the cookie the server saw. */
+  initialOwnerId: string | null;
 }) {
   const router = useRouter();
   const { current, ready } = useIdentity();
-  const [items, setItems] = useState<BellItem[]>(initialItems);
+  /*
+   * Items are stored WITH the person they belong to.
+   *
+   * Identity can change in the browser at any moment. Holding the owner
+   * alongside the data lets the mismatch be resolved during render, so the
+   * previous person's message previews are never displayed and "Mark all read"
+   * can never act on one person's notifications while showing another's. An
+   * effect that cleared state on change would be a frame late and would write
+   * state during the effect body.
+   */
+  const [state, setState] = useState<{
+    ownerId: string | null;
+    items: BellItem[];
+  }>({ ownerId: initialOwnerId, items: initialItems });
   const [open, setOpen] = useState(false);
 
   const peopleById = useMemo(
@@ -64,7 +80,7 @@ export function NotificationBell({
     [people],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (ownerId: string) => {
     try {
       const response = await fetch("/api/notifications", {
         // Never serve a stale count from the browser cache.
@@ -72,7 +88,12 @@ export function NotificationBell({
       });
       if (!response.ok) return;
       const data = await response.json();
-      setItems(Array.isArray(data.items) ? data.items : []);
+      // Stamped with the identity this fetch was for, so a response that
+      // arrives after an identity switch is discarded rather than displayed.
+      setState({
+        ownerId,
+        items: Array.isArray(data.items) ? data.items : [],
+      });
     } catch {
       // Offline or a failed request leaves the previous count in place.
     }
@@ -88,8 +109,11 @@ export function NotificationBell({
    * the cookie the endpoint reads has already changed by then.
    */
   useEffect(() => {
+    const personId = current?.id;
+    if (!personId) return;
+
     const tick = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState === "visible") void load(personId);
     };
     const timer = window.setInterval(tick, POLL_MS);
     document.addEventListener("visibilitychange", tick);
@@ -100,19 +124,32 @@ export function NotificationBell({
   }, [current?.id, load]);
 
   async function markRead(ids?: string[]) {
+    const personId = current?.id;
+    if (!personId) return;
+
+    /*
+     * Always send explicit ids, even for "mark all": the ids of what is
+     * actually on screen. A bare "mark everything" would also clear anything
+     * that arrived between the last poll and the click, which the person never
+     * saw.
+     */
+    const target = ids ?? items.map((i) => i.id);
+    if (target.length === 0) return;
+
     // Clear locally first so the badge responds immediately.
-    setItems((previous) =>
-      ids ? previous.filter((i) => !ids.includes(i.id)) : [],
-    );
+    setState((previous) => ({
+      ownerId: personId,
+      items: previous.items.filter((i) => !target.includes(i.id)),
+    }));
     try {
       await fetch("/api/notifications/read", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ids ? { ids } : {}),
+        body: JSON.stringify({ ids: target }),
       });
     } catch {
       // Re-sync on the next poll if the request failed.
-      void load();
+      void load(personId);
     }
   }
 
@@ -121,6 +158,13 @@ export function NotificationBell({
     return <span className="inline-block h-8 w-8" aria-hidden />;
   }
 
+  /*
+   * Derived, not synced. Anything belonging to a different identity is treated
+   * as absent immediately, so a switch can never show the previous person's
+   * previews while waiting for the next poll.
+   */
+  const items = state.ownerId === current.id ? state.items : [];
+
   const count = items.length;
   const badge = count > BADGE_CAP ? `${BADGE_CAP}+` : String(count);
 
@@ -128,7 +172,13 @@ export function NotificationBell({
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          const opening = !open;
+          setOpen(opening);
+          // Opening is a deliberate action, so fetch rather than wait for the
+          // next tick. This is also what makes an identity switch feel instant.
+          if (opening) void load(current.id);
+        }}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={

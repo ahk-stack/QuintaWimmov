@@ -49,7 +49,11 @@ export default async function HubLayout({
     : [];
 
   return (
-    <AppShell people={people} initialNotifications={notifications}>
+    <AppShell
+      people={people}
+      initialNotifications={notifications}
+      claimedPersonId={claimedId}
+    >
       {children}
     </AppShell>
   );

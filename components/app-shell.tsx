@@ -22,11 +22,14 @@ const NAV = [
 export function AppShell({
   people,
   initialNotifications,
+  claimedPersonId,
   children,
 }: {
   people: Person[];
   /** Seeded server-side from the identity cookie; see NotificationBell. */
   initialNotifications: BellItem[];
+  /** Who those notifications belong to, per the cookie the server saw. */
+  claimedPersonId: string | null;
   children: React.ReactNode;
 }) {
   return (
@@ -67,7 +70,11 @@ export function AppShell({
           {/* ml-auto pins the controls right on the wrapped mobile row, where
               the nav is no longer between them and the logo. */}
           <div className="ml-auto flex items-center gap-1 sm:ml-0">
-            <NotificationBell people={people} initialItems={initialNotifications} />
+            <NotificationBell
+              people={people}
+              initialItems={initialNotifications}
+              initialOwnerId={claimedPersonId}
+            />
             <IdentityMenu />
           </div>
         </div>

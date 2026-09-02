@@ -100,6 +100,35 @@ const globalForStore = globalThis as unknown as {
   __leadHubWriteQueue?: Promise<unknown>;
 };
 
+/**
+ * Fills in collections a stored database predates.
+ *
+ * A .data/db.json written before a collection existed has no key for it, and
+ * `JSON.parse` returns that object verbatim — so the first read would call
+ * `.filter` on undefined and the first write would `.push` onto undefined.
+ * Deleting the file would fix it at the cost of every locally created record.
+ *
+ * Written out field by field on purpose: adding a collection to `Database`
+ * makes this a compile error until it is handled here, so the same trap cannot
+ * be reintroduced silently.
+ */
+function normalise(parsed: Partial<Database>): Database {
+  const asList = <T>(value: unknown): T[] =>
+    Array.isArray(value) ? (value as T[]) : [];
+
+  return {
+    people: asList<Person>(parsed.people),
+    leads: asList<Lead>(parsed.leads),
+    leadEvents: asList<LeadEvent>(parsed.leadEvents),
+    leadComments: asList<LeadComment>(parsed.leadComments),
+    channels: asList<Channel>(parsed.channels),
+    messages: asList<Message>(parsed.messages),
+    directMessages: asList<DirectMessage>(parsed.directMessages),
+    notifications: asList<AppNotification>(parsed.notifications),
+    news: asList<NewsItem>(parsed.news),
+  };
+}
+
 async function load(): Promise<Database> {
   let raw: string;
   try {
@@ -120,7 +149,7 @@ async function load(): Promise<Database> {
   }
 
   try {
-    return JSON.parse(raw) as Database;
+    return normalise(JSON.parse(raw) as Partial<Database>);
   } catch {
     // Corrupt JSON is a problem to surface, never something to overwrite.
     throw new Error(
