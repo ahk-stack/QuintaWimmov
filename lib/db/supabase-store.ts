@@ -245,6 +245,26 @@ function isUnmatchableId(error: { code?: string } | null): boolean {
   return error?.code === INVALID_TEXT_REPRESENTATION;
 }
 
+/** Postgres: unique constraint violated. */
+const UNIQUE_VIOLATION = "23505";
+
+function isDuplicate(error: { code?: string } | null): boolean {
+  return error?.code === UNIQUE_VIOLATION;
+}
+
+/**
+ * Raised when a news slug is already taken.
+ *
+ * Carries no row content, so it is safe to act on without leaking anything the
+ * generic `fail` exists to withhold.
+ */
+export class SlugTakenError extends Error {
+  constructor(public readonly slug: string) {
+    super(`News slug already taken`);
+    this.name = "SlugTakenError";
+  }
+}
+
 // Store -----------------------------------------------------------------------
 
 export const supabaseStore: DataStore = {
@@ -515,5 +535,27 @@ export const supabaseStore: DataStore = {
       .maybeSingle();
     if (error) fail("getNewsBySlug");
     return data ? toNews(data as NewsRow) : null;
+  },
+
+  async createNews(input) {
+    const { data, error } = await client()
+      .from("news")
+      .insert({
+        title: input.title,
+        slug: input.slug,
+        excerpt: input.excerpt ?? null,
+        body: input.body,
+        category: input.category ?? null,
+        author_id: input.authorId,
+        pinned: input.pinned ?? false,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      // Surface a slug clash distinctly so the caller can pick another.
+      if (isDuplicate(error)) throw new SlugTakenError(input.slug);
+      fail("createNews");
+    }
+    return toNews(data as NewsRow);
   },
 };

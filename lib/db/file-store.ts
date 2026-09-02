@@ -392,4 +392,25 @@ export const fileStore: DataStore = {
   async getNewsBySlug(slug) {
     return read((d) => d.news.find((n) => n.slug === slug) ?? null);
   },
+
+  async createNews(input) {
+    return mutate((d) => {
+      if (d.news.some((n) => n.slug === input.slug)) {
+        throw new Error(`News slug "${input.slug}" already exists`);
+      }
+      const item: NewsItem = {
+        id: randomUUID(),
+        title: input.title,
+        slug: input.slug,
+        excerpt: input.excerpt ?? null,
+        body: input.body,
+        category: input.category ?? null,
+        authorId: input.authorId,
+        publishedAt: new Date().toISOString(),
+        pinned: input.pinned ?? false,
+      };
+      d.news.push(item);
+      return item;
+    });
+  },
 };

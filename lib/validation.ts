@@ -118,6 +118,35 @@ export const messageSchema = z.object({
   body: z.string().trim().min(1, "Write something").max(4000),
 });
 
+export const newsSchema = z.object({
+  authorId: z.string().min(1, "Pick your name first").max(64),
+  title: z.string().trim().min(3, "Give it a title").max(200),
+  excerpt: optionalText(400),
+  body: z.string().trim().min(1, "Write something").max(20000),
+  category: optionalText(40),
+  pinned: z.boolean().default(false),
+});
+
+/**
+ * URL-safe slug from a title.
+ *
+ * Derived server-side rather than accepted from the client, so the slug cannot
+ * be used to smuggle path segments or collide deliberately with another post.
+ */
+export function slugify(title: string): string {
+  const base = title
+    .normalize("NFKD")
+    // Strip diacritics so "Markéta" becomes "marketa" rather than dropping out.
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 110);
+  // A title of only punctuation would slugify to nothing; the column requires
+  // at least one character and the pattern rejects an empty string.
+  return base.length > 0 ? base : `post-${Date.now()}`;
+}
+
 /**
  * Flattens zod issues to `{ field: message }`.
  *

@@ -47,6 +47,18 @@ export interface LeadPatch {
   priority?: Lead["priority"];
 }
 
+export interface NewNews {
+  title: string;
+  /** Unique, URL-safe. Derived from the title server-side. */
+  slug: string;
+  excerpt?: string | null;
+  /** Markdown. Rendered without raw-HTML support, so it cannot inject markup. */
+  body: string;
+  category?: string | null;
+  authorId: string;
+  pinned?: boolean;
+}
+
 export interface HubSpotResult {
   contactId?: string | null;
   companyId?: string | null;
@@ -95,4 +107,5 @@ export interface DataStore {
   // News --------------------------------------------------------------------
   listNews(limit?: number): Promise<NewsItem[]>;
   getNewsBySlug(slug: string): Promise<NewsItem | null>;
+  createNews(input: NewNews): Promise<NewsItem>;
 }
