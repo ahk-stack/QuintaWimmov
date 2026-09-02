@@ -1,10 +1,20 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ChatRoom } from "@/components/chat-room";
+import { ChatSidebar } from "@/components/chat-sidebar";
+import { getClaimedPerson } from "@/lib/current-person";
 import { getStore, storeKind } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Route segments under /chat that are not channel slugs.
+ *
+ * A channel with one of these slugs would be shadowed by the static route and
+ * unreachable. Channels are seeded rather than user-created today, so this is a
+ * note for whoever adds channel creation.
+ */
+export const RESERVED_CHAT_SLUGS = ["direct"] as const;
 
 export async function generateMetadata({
   params,
@@ -32,46 +42,30 @@ export default async function ChannelPage({
   const { slug } = await params;
   const store = getStore();
 
-  const [channel, channels, people] = await Promise.all([
+  const [channel, channels, people, claimed] = await Promise.all([
     store.getChannelBySlug(slug),
     store.listChannels(),
     store.listPeople(),
+    // Attribution only — decides what to show, never what to allow.
+    getClaimedPerson(),
   ]);
 
   if (!channel) notFound();
 
-  const messages = await store.listMessages(channel.id);
+  const [messages, conversations] = await Promise.all([
+    store.listMessages(channel.id),
+    claimed ? store.listConversations(claimed.id) : Promise.resolve([]),
+  ]);
 
   return (
-    <div className="grid gap-10 lg:grid-cols-[13rem_1fr]">
-      <nav aria-label="Channels">
-        <h2 className="mb-3 text-xs font-bold tracking-[0.18em] uppercase">
-          Channels
-        </h2>
-        <ul className="space-y-1">
-          {channels.map((item) => {
-            const active = item.slug === channel.slug;
-            return (
-              <li key={item.id}>
-                <Link
-                  href={`/chat/${item.slug}`}
-                  aria-current={active ? "page" : undefined}
-                  className={`block rounded-lg px-3 py-2 text-sm transition-colors ${
-                    active
-                      ? "bg-ink font-bold text-paper"
-                      : "text-muted hover:bg-surface hover:text-ink"
-                  }`}
-                >
-                  {item.name}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-        <p className="mt-6 text-xs text-muted">
-          Discussion about a specific lead belongs on that lead, not here.
-        </p>
-      </nav>
+    <div className="grid gap-10 lg:grid-cols-[15rem_1fr]">
+      <ChatSidebar
+        channels={channels}
+        activeChannelSlug={channel.slug}
+        conversations={conversations}
+        people={people}
+        currentPerson={claimed}
+      />
 
       {/*
         The room manages its own scrolling, so it is given a bounded height

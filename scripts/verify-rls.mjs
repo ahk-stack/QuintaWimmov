@@ -65,6 +65,7 @@ const TABLES = [
   "lead_comments",
   "channels",
   "messages",
+  "direct_messages",
   "news",
 ];
 
@@ -148,10 +149,71 @@ console.log("\n5. THE CRITICAL TEST: anon must NOT see lead contact data");
 }
 
 console.log("\n6. anon must NOT read the other private tables");
-for (const t of ["people", "lead_events", "lead_comments", "news"]) {
+for (const t of ["people", "lead_events", "lead_comments", "news", "direct_messages"]) {
   const { status, body } = await get(`${t}?select=*`, ANON);
   const rows = Array.isArray(body) ? body.length : -1;
   check(`anon reads 0 from ${t}`, rows === 0, `${rows} row(s), HTTP ${status}`);
+}
+
+console.log("\n6b. THE DM BOUNDARY: a planted direct message must be invisible to anon");
+{
+  const CANARY = `dm-canary-${Date.now()}-do-not-leak`;
+  /*
+   * Baseline first. Asserting an empty table after cleanup would fail on any
+   * project with real DM traffic — the same trap the lead probe above avoids.
+   */
+  const baselineDms = await (async () => {
+    const { body } = await get("direct_messages?select=id", SVC);
+    return Array.isArray(body) ? body.length : -1;
+  })();
+  const two = await get("people?select=id&limit=2", SVC);
+  const pair = Array.isArray(two.body) ? two.body : [];
+
+  if (pair.length < 2) {
+    check("two people available to plant a DM", false, "roster too small");
+  } else {
+    const planted = await post("direct_messages", SVC, {
+      sender_id: pair[0].id,
+      recipient_id: pair[1].id,
+      body: CANARY,
+    });
+    const dmId = Array.isArray(planted.body) ? planted.body[0]?.id : null;
+    check("DM planted with service_role", Boolean(dmId), `HTTP ${planted.status}`);
+
+    const svcView = await get("direct_messages?select=body", SVC);
+    check("service_role can read it", JSON.stringify(svcView.body ?? "").includes(CANARY));
+
+    const anonView = await get("direct_messages?select=*", ANON);
+    const rows = Array.isArray(anonView.body) ? anonView.body.length : -1;
+    check("anon sees ZERO direct messages", rows === 0, `${rows} row(s)`);
+    check(
+      "canary text absent from the anon response",
+      !JSON.stringify(anonView.body ?? "").includes(CANARY),
+    );
+
+    const anonWrite = await post("direct_messages", ANON, {
+      sender_id: pair[0].id,
+      recipient_id: pair[1].id,
+      body: "anon should not write",
+    });
+    check("anon INSERT into direct_messages refused", anonWrite.status >= 400, `HTTP ${anonWrite.status}`);
+
+    const selfDm = await post("direct_messages", SVC, {
+      sender_id: pair[0].id,
+      recipient_id: pair[0].id,
+      body: "self",
+    });
+    check("self-addressed DM rejected by constraint", selfDm.status >= 400, `HTTP ${selfDm.status}`);
+
+    if (dmId) await del(`direct_messages?id=eq.${dmId}`, SVC);
+    const after = await get("direct_messages?select=id", SVC);
+    const now = Array.isArray(after.body) ? after.body.length : -1;
+    check(
+      "DM count back to baseline (only the canary removed)",
+      now === baselineDms,
+      `${now} row(s), baseline was ${baselineDms}`,
+    );
+  }
 }
 
 console.log("\n7. anon must NOT be able to write anywhere");

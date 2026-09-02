@@ -53,11 +53,30 @@ function readStoredId(): string | null {
   }
 }
 
+/*
+ * Identity is mirrored into a cookie as well as localStorage.
+ *
+ * localStorage is invisible to the server, and server components need to know
+ * who is looking in order to render "my direct messages" without exposing an
+ * endpoint that would let anyone enumerate another person's conversations.
+ *
+ * Not httpOnly and not Secure-only, because the client sets it. It is still an
+ * attribution label, not a credential: anyone can edit a cookie, exactly as
+ * anyone can pick any name from the roster. Nothing may be authorised from it.
+ */
+const COOKIE_KEY = "leadhub_identity";
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
 function writeStoredId(id: string): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, id);
   } catch {
     // Non-fatal; the choice simply will not survive a reload.
+  }
+  try {
+    document.cookie = `${COOKIE_KEY}=${encodeURIComponent(id)}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
+  } catch {
+    // Blocked cookies only cost server-side personalisation, not the app.
   }
   // The storage event does not fire in the tab that wrote, so notify directly.
   for (const listener of listeners) listener();
@@ -98,22 +117,34 @@ export function IdentityProvider({
 
   const select = useCallback((id: string) => writeStoredId(id), []);
 
-  const value = useMemo<IdentityContextValue>(
-    () => ({
-      people,
-      // Resolving against the roster also discards an id that no longer exists.
-      current: people.find((p) => p.id === storedId) ?? null,
-      ready,
-      select,
-    }),
-    [people, storedId, ready, select],
-  );
+  const value = useMemo<IdentityContextValue>(() => {
+    // Resolving against the roster also discards an id that no longer exists.
+    const current = people.find((p) => p.id === storedId) ?? null;
+    if (ready) syncCookie(current?.id ?? null);
+    return { people, current, ready, select };
+  }, [people, storedId, ready, select]);
 
   return (
     <IdentityContext.Provider value={value}>
       {children}
     </IdentityContext.Provider>
   );
+}
+
+/**
+ * Backfills the cookie for anyone whose identity predates it, and clears it when
+ * the stored id no longer matches the roster.
+ */
+function syncCookie(resolvedId: string | null): void {
+  try {
+    if (resolvedId) {
+      document.cookie = `${COOKIE_KEY}=${encodeURIComponent(resolvedId)}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
+    } else {
+      document.cookie = `${COOKIE_KEY}=; path=/; max-age=0; SameSite=Lax`;
+    }
+  } catch {
+    // Non-fatal.
+  }
 }
 
 export function useIdentity(): IdentityContextValue {

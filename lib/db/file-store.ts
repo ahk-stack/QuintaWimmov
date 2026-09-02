@@ -6,6 +6,7 @@ import path from "node:path";
 
 import type {
   Channel,
+  DirectMessage,
   Lead,
   LeadComment,
   LeadEvent,
@@ -51,6 +52,7 @@ interface Database {
   leadComments: LeadComment[];
   channels: Channel[];
   messages: Message[];
+  directMessages: DirectMessage[];
   news: NewsItem[];
 }
 
@@ -65,6 +67,9 @@ function seedDatabase(): Database {
     leadComments: structuredClone(SEED_LEAD_COMMENTS),
     channels: structuredClone(SEED_CHANNELS),
     messages: structuredClone(SEED_MESSAGES),
+    // No seeded direct messages: inventing private-looking chatter between real
+    // named people would be worse than an empty inbox.
+    directMessages: [],
     news: structuredClone(SEED_NEWS),
   };
 }
@@ -373,8 +378,63 @@ export const fileStore: DataStore = {
         body: input.body,
         createdAt: new Date().toISOString(),
         editedAt: null,
+        mentions: input.mentions ?? [],
       };
       d.messages.push(message);
+      return message;
+    });
+  },
+
+  async listConversations(personId) {
+    return read((d) => {
+      const mine = d.directMessages.filter(
+        (m) => m.senderId === personId || m.recipientId === personId,
+      );
+      const byPerson = new Map<string, DirectMessage[]>();
+      for (const m of mine) {
+        const other = m.senderId === personId ? m.recipientId : m.senderId;
+        const bucket = byPerson.get(other);
+        if (bucket) bucket.push(m);
+        else byPerson.set(other, [m]);
+      }
+      return [...byPerson.entries()]
+        .map(([otherId, items]) => {
+          const sorted = [...items].sort(oldest);
+          return {
+            personId: otherId,
+            lastMessage: sorted[sorted.length - 1],
+            messageCount: sorted.length,
+          };
+        })
+        .sort((a, b) =>
+          b.lastMessage.createdAt.localeCompare(a.lastMessage.createdAt),
+        );
+    });
+  },
+
+  async listDirectMessages(personA, personB, limit = 200) {
+    return read((d) =>
+      d.directMessages
+        .filter(
+          (m) =>
+            (m.senderId === personA && m.recipientId === personB) ||
+            (m.senderId === personB && m.recipientId === personA),
+        )
+        .sort(oldest)
+        .slice(-limit),
+    );
+  },
+
+  async createDirectMessage(input) {
+    return mutate((d) => {
+      const message: DirectMessage = {
+        id: randomUUID(),
+        senderId: input.senderId,
+        recipientId: input.recipientId,
+        body: input.body,
+        createdAt: new Date().toISOString(),
+      };
+      d.directMessages.push(message);
       return message;
     });
   },
