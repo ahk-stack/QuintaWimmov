@@ -66,6 +66,7 @@ const TABLES = [
   "channels",
   "messages",
   "direct_messages",
+  "notifications",
   "news",
 ];
 
@@ -76,7 +77,7 @@ const check = (label, ok, detail = "") => {
   console.log(`  ${pass(ok)}  ${label}${detail ? `  (${detail})` : ""}`);
 };
 
-console.log("1. All 7 tables exist (service_role)");
+console.log(`1. All ${TABLES.length} tables exist (service_role)`);
 for (const t of TABLES) {
   const { status } = await get(`${t}?select=*&limit=1`, SVC);
   check(t, status === 200, `HTTP ${status}`);
@@ -149,7 +150,7 @@ console.log("\n5. THE CRITICAL TEST: anon must NOT see lead contact data");
 }
 
 console.log("\n6. anon must NOT read the other private tables");
-for (const t of ["people", "lead_events", "lead_comments", "news", "direct_messages"]) {
+for (const t of ["people", "lead_events", "lead_comments", "news", "direct_messages", "notifications"]) {
   const { status, body } = await get(`${t}?select=*`, ANON);
   const rows = Array.isArray(body) ? body.length : -1;
   check(`anon reads 0 from ${t}`, rows === 0, `${rows} row(s), HTTP ${status}`);
@@ -212,6 +213,61 @@ console.log("\n6b. THE DM BOUNDARY: a planted direct message must be invisible t
       "DM count back to baseline (only the canary removed)",
       now === baselineDms,
       `${now} row(s), baseline was ${baselineDms}`,
+    );
+  }
+}
+
+console.log("\n6c. THE NOTIFICATION BOUNDARY: previews quote message text, so anon must see none");
+{
+  const CANARY = `notif-canary-${Date.now()}-do-not-leak`;
+  const baselineNotifs = await (async () => {
+    const { body } = await get("notifications?select=id", SVC);
+    return Array.isArray(body) ? body.length : -1;
+  })();
+
+  const two = await get("people?select=id&limit=2", SVC);
+  const pair = Array.isArray(two.body) ? two.body : [];
+
+  if (pair.length < 2) {
+    check("two people available to plant a notification", false, "roster too small");
+  } else {
+    const planted = await post("notifications", SVC, {
+      person_id: pair[0].id,
+      kind: "direct_message",
+      actor_id: pair[1].id,
+      source_id: pair[1].id,
+      href: `/chat/direct/${pair[1].id}`,
+      preview: CANARY,
+    });
+    const notifId = Array.isArray(planted.body) ? planted.body[0]?.id : null;
+    check("notification planted with service_role", Boolean(notifId), `HTTP ${planted.status}`);
+
+    const svcView = await get("notifications?select=preview", SVC);
+    check("service_role can read it", JSON.stringify(svcView.body ?? "").includes(CANARY));
+
+    const anonView = await get("notifications?select=*", ANON);
+    const rows = Array.isArray(anonView.body) ? anonView.body.length : -1;
+    check("anon sees ZERO notifications", rows === 0, `${rows} row(s)`);
+    check(
+      "preview text absent from the anon response",
+      !JSON.stringify(anonView.body ?? "").includes(CANARY),
+    );
+
+    const anonWrite = await post("notifications", ANON, {
+      person_id: pair[0].id,
+      kind: "mention",
+      source_id: pair[1].id,
+      href: "/chat/general",
+    });
+    check("anon INSERT into notifications refused", anonWrite.status >= 400, `HTTP ${anonWrite.status}`);
+
+    if (notifId) await del(`notifications?id=eq.${notifId}`, SVC);
+    const after = await get("notifications?select=id", SVC);
+    const now = Array.isArray(after.body) ? after.body.length : -1;
+    check(
+      "notification count back to baseline",
+      now === baselineNotifs,
+      `${now} row(s), baseline was ${baselineNotifs}`,
     );
   }
 }
