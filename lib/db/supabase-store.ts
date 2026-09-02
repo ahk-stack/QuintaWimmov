@@ -11,12 +11,13 @@ import type {
   NewsItem,
   Person,
 } from "../types";
-import type {
-  DataStore,
-  HubSpotResult,
-  LeadFilter,
-  LeadPatch,
-  NewLead,
+import {
+  SlugTakenError,
+  type DataStore,
+  type HubSpotResult,
+  type LeadFilter,
+  type LeadPatch,
+  type NewLead,
 } from "./store";
 
 /**
@@ -243,6 +244,13 @@ const INVALID_TEXT_REPRESENTATION = "22P02";
  */
 function isUnmatchableId(error: { code?: string } | null): boolean {
   return error?.code === INVALID_TEXT_REPRESENTATION;
+}
+
+/** Postgres: unique constraint violated. */
+const UNIQUE_VIOLATION = "23505";
+
+function isDuplicate(error: { code?: string } | null): boolean {
+  return error?.code === UNIQUE_VIOLATION;
 }
 
 // Store -----------------------------------------------------------------------
@@ -515,5 +523,27 @@ export const supabaseStore: DataStore = {
       .maybeSingle();
     if (error) fail("getNewsBySlug");
     return data ? toNews(data as NewsRow) : null;
+  },
+
+  async createNews(input) {
+    const { data, error } = await client()
+      .from("news")
+      .insert({
+        title: input.title,
+        slug: input.slug,
+        excerpt: input.excerpt ?? null,
+        body: input.body,
+        category: input.category ?? null,
+        author_id: input.authorId,
+        pinned: input.pinned ?? false,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      // Surface a slug clash distinctly so the caller can pick another.
+      if (isDuplicate(error)) throw new SlugTakenError(input.slug);
+      fail("createNews");
+    }
+    return toNews(data as NewsRow);
   },
 };

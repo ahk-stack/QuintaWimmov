@@ -22,12 +22,13 @@ import {
   SEED_NEWS,
   SEED_PEOPLE,
 } from "./seed";
-import type {
-  DataStore,
-  HubSpotResult,
-  LeadFilter,
-  LeadPatch,
-  NewLead,
+import {
+  SlugTakenError,
+  type DataStore,
+  type HubSpotResult,
+  type LeadFilter,
+  type LeadPatch,
+  type NewLead,
 } from "./store";
 
 /**
@@ -391,5 +392,31 @@ export const fileStore: DataStore = {
 
   async getNewsBySlug(slug) {
     return read((d) => d.news.find((n) => n.slug === slug) ?? null);
+  },
+
+  async createNews(input) {
+    return mutate((d) => {
+      /*
+       * Must be the same error type the Supabase store raises, so the route's
+       * collision retry works on either store. A plain Error here made a
+       * concurrent publish return 500 instead of trying the next suffix.
+       */
+      if (d.news.some((n) => n.slug === input.slug)) {
+        throw new SlugTakenError(input.slug);
+      }
+      const item: NewsItem = {
+        id: randomUUID(),
+        title: input.title,
+        slug: input.slug,
+        excerpt: input.excerpt ?? null,
+        body: input.body,
+        category: input.category ?? null,
+        authorId: input.authorId,
+        publishedAt: new Date().toISOString(),
+        pinned: input.pinned ?? false,
+      };
+      d.news.push(item);
+      return item;
+    });
   },
 };
