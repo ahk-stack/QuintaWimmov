@@ -22,12 +22,13 @@ import {
   SEED_NEWS,
   SEED_PEOPLE,
 } from "./seed";
-import type {
-  DataStore,
-  HubSpotResult,
-  LeadFilter,
-  LeadPatch,
-  NewLead,
+import {
+  SlugTakenError,
+  type DataStore,
+  type HubSpotResult,
+  type LeadFilter,
+  type LeadPatch,
+  type NewLead,
 } from "./store";
 
 /**
@@ -395,8 +396,13 @@ export const fileStore: DataStore = {
 
   async createNews(input) {
     return mutate((d) => {
+      /*
+       * Must be the same error type the Supabase store raises, so the route's
+       * collision retry works on either store. A plain Error here made a
+       * concurrent publish return 500 instead of trying the next suffix.
+       */
       if (d.news.some((n) => n.slug === input.slug)) {
-        throw new Error(`News slug "${input.slug}" already exists`);
+        throw new SlugTakenError(input.slug);
       }
       const item: NewsItem = {
         id: randomUUID(),

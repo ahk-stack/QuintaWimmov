@@ -47,6 +47,20 @@ export interface LeadPatch {
   priority?: Lead["priority"];
 }
 
+/**
+ * Raised when a news slug is already taken.
+ *
+ * Lives here rather than in one store so BOTH implementations signal a
+ * collision the same way, and the route's retry works regardless of which
+ * store is active. Carries no row content, so acting on it leaks nothing.
+ */
+export class SlugTakenError extends Error {
+  constructor(public readonly slug: string) {
+    super("News slug already taken");
+    this.name = "SlugTakenError";
+  }
+}
+
 export interface NewNews {
   title: string;
   /** Unique, URL-safe. Derived from the title server-side. */

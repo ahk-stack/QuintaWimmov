@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
+
 import { getStore } from "@/lib/db";
+import { SlugTakenError } from "@/lib/db/store";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { fieldErrors, newsSchema, slugify } from "@/lib/validation";
 
@@ -12,8 +15,14 @@ import { fieldErrors, newsSchema, slugify } from "@/lib/validation";
  * while the app has no sign-in. Do not mistake it for access control.
  */
 
-/** Distinct slugs to try before giving up, when the derived one is taken. */
-const MAX_SLUG_ATTEMPTS = 20;
+/**
+ * Numbered suffixes to try before falling back to a random one.
+ *
+ * Starts at 2, so the first duplicate of "spring-update" is
+ * "spring-update-2" — the usual convention, and "-1" reads as though there
+ * were a zeroth post.
+ */
+const MAX_NUMBERED_SLUGS = 20;
 
 export async function POST(request: Request) {
   const limited = enforceRateLimit(request, "news:create", 10, 60_000);
@@ -46,21 +55,31 @@ export async function POST(request: Request) {
 
   /*
    * Slug is derived server-side, never accepted from the client, so it cannot
-   * smuggle path segments or be aimed at an existing post. On a collision, try
-   * a numbered suffix rather than failing the write.
+   * smuggle path segments or be aimed at an existing post.
+   *
+   * Candidates: the clean slug, then numbered suffixes, then a random one. The
+   * random tail means a publish can never be rejected for want of a free URL,
+   * which is better than returning an error while the post is written and the
+   * author is waiting.
    */
   const base = slugify(parsed.data.title);
 
-  for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
-    const slug = attempt === 0 ? base : `${base}-${attempt + 1}`;
+  function* candidates(): Generator<string> {
+    yield base;
+    for (let n = 2; n <= MAX_NUMBERED_SLUGS; n++) yield `${base}-${n}`;
+    yield `${base}-${randomUUID().slice(0, 8)}`;
+  }
+
+  for (const slug of candidates()) {
+    // Cheap pre-check; the store's unique constraint is the real arbiter.
     if (await store.getNewsBySlug(slug)) continue;
 
     try {
       const item = await store.createNews({ ...parsed.data, slug });
       return Response.json({ slug: item.slug }, { status: 201 });
     } catch (error) {
-      // Lost a race between the check and the insert: try the next suffix.
-      if (error instanceof Error && error.name === "SlugTakenError") continue;
+      // Lost a race between the check and the insert: try the next candidate.
+      if (error instanceof SlugTakenError) continue;
       return Response.json(
         { error: "Could not publish the post" },
         { status: 500 },
@@ -68,8 +87,9 @@ export async function POST(request: Request) {
     }
   }
 
+  // Only reachable if even the random slug collided, i.e. essentially never.
   return Response.json(
-    { error: "Could not find a free URL for that title. Try a different one." },
-    { status: 409 },
+    { error: "Could not publish the post" },
+    { status: 500 },
   );
 }

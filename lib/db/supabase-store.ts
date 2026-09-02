@@ -11,12 +11,13 @@ import type {
   NewsItem,
   Person,
 } from "../types";
-import type {
-  DataStore,
-  HubSpotResult,
-  LeadFilter,
-  LeadPatch,
-  NewLead,
+import {
+  SlugTakenError,
+  type DataStore,
+  type HubSpotResult,
+  type LeadFilter,
+  type LeadPatch,
+  type NewLead,
 } from "./store";
 
 /**
@@ -250,19 +251,6 @@ const UNIQUE_VIOLATION = "23505";
 
 function isDuplicate(error: { code?: string } | null): boolean {
   return error?.code === UNIQUE_VIOLATION;
-}
-
-/**
- * Raised when a news slug is already taken.
- *
- * Carries no row content, so it is safe to act on without leaking anything the
- * generic `fail` exists to withhold.
- */
-export class SlugTakenError extends Error {
-  constructor(public readonly slug: string) {
-    super(`News slug already taken`);
-    this.name = "SlugTakenError";
-  }
 }
 
 // Store -----------------------------------------------------------------------
