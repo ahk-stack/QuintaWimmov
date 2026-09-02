@@ -1,5 +1,7 @@
 import type {
   Channel,
+  Conversation,
+  DirectMessage,
   Lead,
   LeadComment,
   LeadDirection,
@@ -116,7 +118,26 @@ export interface DataStore {
     channelId: string;
     authorId: string;
     body: string;
+    mentions?: string[];
   }): Promise<Message>;
+
+  // Direct messages ---------------------------------------------------------
+  /**
+   * Conversations involving `personId`, most recently active first.
+   * Server-side only: this table has no anon access by design.
+   */
+  listConversations(personId: string): Promise<Conversation[]>;
+  /** The thread between two people, oldest first. Order of arguments is irrelevant. */
+  listDirectMessages(
+    personA: string,
+    personB: string,
+    limit?: number,
+  ): Promise<DirectMessage[]>;
+  createDirectMessage(input: {
+    senderId: string;
+    recipientId: string;
+    body: string;
+  }): Promise<DirectMessage>;
 
   // News --------------------------------------------------------------------
   listNews(limit?: number): Promise<NewsItem[]>;

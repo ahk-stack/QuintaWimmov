@@ -281,6 +281,7 @@ export const SEED_MESSAGES: Message[] = [
     body: "Welcome to the Lead Hub. Post a lead here instead of emailing it, and we will finally be able to see where things stand.",
     createdAt: "2026-08-24T08:00:00.000Z",
     editedAt: null,
+    mentions: [],
   },
   {
     id: "m-2",
@@ -289,6 +290,7 @@ export const SEED_MESSAGES: Message[] = [
     body: "Long overdue. Can we filter the board by territory later?",
     createdAt: "2026-08-24T08:14:00.000Z",
     editedAt: null,
+    mentions: [],
   },
   {
     id: "m-3",
@@ -297,6 +299,7 @@ export const SEED_MESSAGES: Message[] = [
     body: "Dropped Hotel des Quatre Vents in as a lead for sales. The GM is expecting a call this week, so it is genuinely time sensitive.",
     createdAt: "2026-08-24T09:15:00.000Z",
     editedAt: null,
+    mentions: [],
   },
   {
     id: "m-4",
@@ -305,6 +308,7 @@ export const SEED_MESSAGES: Message[] = [
     body: "Seen. Annecy is mine, I will take it this afternoon.",
     createdAt: "2026-08-24T09:40:00.000Z",
     editedAt: null,
+    mentions: [],
   },
   {
     id: "m-5",
@@ -313,6 +317,7 @@ export const SEED_MESSAGES: Message[] = [
     body: "Palazzo Sereno signed for Velma on their second property. The consultant note on the first deal is what made the difference.",
     createdAt: "2026-08-29T13:50:00.000Z",
     editedAt: null,
+    mentions: [],
   },
 ];
 

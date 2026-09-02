@@ -6,8 +6,12 @@ import { dayKey, formatDate, formatTime } from "@/lib/format";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 import type { Channel, Message, Person } from "@/lib/types";
 
+import { findMentions } from "@/lib/mentions";
+
 import { useIdentity } from "./identity";
-import { Avatar, Button } from "./ui";
+import { MessageBody } from "./message-body";
+import { MessageComposer } from "./message-composer";
+import { Avatar } from "./ui";
 
 /**
  * A live chat channel.
@@ -25,6 +29,7 @@ interface MessageRow {
   body: string;
   created_at: string;
   edited_at: string | null;
+  mentions: string[] | null;
 }
 
 const rowToMessage = (r: MessageRow): Message => ({
@@ -34,6 +39,7 @@ const rowToMessage = (r: MessageRow): Message => ({
   body: r.body,
   createdAt: r.created_at,
   editedAt: r.edited_at,
+  mentions: r.mentions ?? [],
 });
 
 export function ChatRoom({
@@ -47,9 +53,6 @@ export function ChatRoom({
 }) {
   const { current, ready } = useIdentity();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
-  const [body, setBody] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -103,13 +106,12 @@ export function ChatRoom({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length]);
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = body.trim();
-    if (!trimmed || sending || !current) return;
-
-    setSending(true);
-    setError(null);
+  /**
+   * Sends a message. Returns an error string for the composer to show, or null
+   * on success so it can clear itself.
+   */
+  async function send(trimmed: string): Promise<string | null> {
+    if (!current) return "Pick your name in the top right first.";
     try {
       const response = await fetch("/api/messages", {
         method: "POST",
@@ -122,11 +124,9 @@ export function ChatRoom({
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));
-        setError(result.error ?? "Could not send that");
-        return;
+        return result.error ?? "Could not send that";
       }
       const { id } = await response.json();
-      setBody("");
       /*
        * Show it immediately rather than waiting for the Realtime round trip, so
        * the composer feels instant and still works if the socket is down. The
@@ -139,11 +139,12 @@ export function ChatRoom({
         body: trimmed,
         createdAt: new Date().toISOString(),
         editedAt: null,
+        // Display-only here; the server records the authoritative list.
+        mentions: findMentions(trimmed, people),
       });
+      return null;
     } catch {
-      setError("Could not reach the server.");
-    } finally {
-      setSending(false);
+      return "Could not reach the server.";
     }
   }
 
@@ -214,9 +215,11 @@ export function ChatRoom({
                               {formatTime(message.createdAt)}
                             </span>
                           </p>
-                          <p className="mt-0.5 text-sm leading-relaxed whitespace-pre-line">
-                            {message.body}
-                          </p>
+                          <MessageBody
+                            body={message.body}
+                            people={people}
+                            currentPersonId={current?.id}
+                          />
                         </div>
                       </li>
                     );
@@ -235,39 +238,16 @@ export function ChatRoom({
             Pick your name in the top right to join the conversation.
           </p>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <label className="block">
-              <span className="sr-only">Message {channel.name}</span>
-              <textarea
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                onKeyDown={(event) => {
-                  // Enter sends; Shift+Enter makes a new line.
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }
-                }}
-                rows={2}
-                maxLength={4000}
-                placeholder={`Message ${channel.name}`}
-                className="w-full resize-y rounded-lg border border-line-strong bg-paper px-3 py-2.5 text-sm placeholder:text-muted/70"
-              />
-            </label>
-            {error ? (
-              <p role="alert" className="text-xs font-bold text-status-lost">
-                {error}
-              </p>
-            ) : null}
-            <div className="flex items-center gap-3">
-              <Button type="submit" disabled={sending || body.trim().length === 0}>
-                {sending ? "Sending..." : "Send"}
-              </Button>
-              <span className="text-xs text-muted">
-                as {current.name} · Enter sends, Shift+Enter for a new line
-              </span>
-            </div>
-          </form>
+          <MessageComposer
+            people={people}
+            placeholder={`Message ${channel.name}`}
+            hint={
+              <>
+                as {current.name} · type {"@"} to mention someone · Enter sends
+              </>
+            }
+            onSend={send}
+          />
         )}
       </div>
     </div>

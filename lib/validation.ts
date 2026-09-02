@@ -118,6 +118,12 @@ export const messageSchema = z.object({
   body: z.string().trim().min(1, "Write something").max(4000),
 });
 
+export const directMessageSchema = z.object({
+  senderId: z.string().min(1, "Pick your name first").max(64),
+  recipientId: z.string().min(1, "Pick someone to message").max(64),
+  body: z.string().trim().min(1, "Write something").max(4000),
+});
+
 export const newsSchema = z.object({
   authorId: z.string().min(1, "Pick your name first").max(64),
   title: z.string().trim().min(3, "Give it a title").max(200),

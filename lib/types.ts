@@ -106,6 +106,31 @@ export interface Message {
   body: string;
   createdAt: string;
   editedAt: string | null;
+  /** People mentioned with @, recorded at send time. */
+  mentions: string[];
+}
+
+/**
+ * A message addressed to one person.
+ *
+ * "Direct", not "private". The table denies the anon key everything, so nothing
+ * leaks through the public API — but the app has no sign-in, so anyone who
+ * selects a name in the picker can read that person's messages. The UI says so.
+ */
+export interface DirectMessage {
+  id: string;
+  senderId: string;
+  recipientId: string;
+  body: string;
+  createdAt: string;
+}
+
+/** One row in the direct-message sidebar. */
+export interface Conversation {
+  /** The other participant, from the point of view of whoever is looking. */
+  personId: string;
+  lastMessage: DirectMessage;
+  messageCount: number;
 }
 
 export interface NewsItem {

@@ -1,4 +1,5 @@
 import { getStore } from "@/lib/db";
+import { findMentions } from "@/lib/mentions";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { fieldErrors, messageSchema } from "@/lib/validation";
 
@@ -39,7 +40,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const message = await store.createMessage(parsed.data);
+    /*
+     * Mentions are derived here from the submitted text, not taken from the
+     * client. The composer's picks are only a typing aid — the author can edit
+     * or delete a name afterwards, and a client-supplied list could name anyone.
+     */
+    const people = await store.listPeople();
+    const message = await store.createMessage({
+      ...parsed.data,
+      mentions: findMentions(parsed.data.body, people),
+    });
     return Response.json({ id: message.id }, { status: 201 });
   } catch {
     return Response.json(

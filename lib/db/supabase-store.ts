@@ -4,6 +4,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import type {
   Channel,
+  Conversation,
+  DirectMessage,
   Lead,
   LeadComment,
   LeadEvent,
@@ -103,6 +105,15 @@ interface MessageRow {
   body: string;
   created_at: string;
   edited_at: string | null;
+  mentions: string[] | null;
+}
+
+interface DirectMessageRow {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  body: string;
+  created_at: string;
 }
 
 interface NewsRow {
@@ -187,6 +198,16 @@ const toMessage = (r: MessageRow): Message => ({
   body: r.body,
   createdAt: r.created_at,
   editedAt: r.edited_at,
+  // Older rows predate the column; the default is '{}' but be defensive.
+  mentions: r.mentions ?? [],
+});
+
+const toDirectMessage = (r: DirectMessageRow): DirectMessage => ({
+  id: r.id,
+  senderId: r.sender_id,
+  recipientId: r.recipient_id,
+  body: r.body,
+  createdAt: r.created_at,
 });
 
 const toNews = (r: NewsRow): NewsItem => ({
@@ -495,11 +516,85 @@ export const supabaseStore: DataStore = {
         channel_id: input.channelId,
         author_id: input.authorId,
         body: input.body,
+        mentions: input.mentions ?? [],
       })
       .select("*")
       .single();
     if (error) fail("createMessage");
     return toMessage(data as MessageRow);
+  },
+
+  /*
+   * Direct messages are read here, under the service-role key, because the
+   * table grants the anon key nothing. See migration 0004 for why.
+   */
+  async listConversations(personId) {
+    const { data, error } = await client()
+      .from("direct_messages")
+      .select("*")
+      .or(`sender_id.eq.${personId},recipient_id.eq.${personId}`)
+      .order("created_at", { ascending: false });
+    if (error) {
+      if (isUnmatchableId(error)) return [];
+      fail("listConversations");
+    }
+
+    /*
+     * Grouped in JS rather than SQL. A DISTINCT ON over the normalised pair
+     * would be tidier, but it needs an RPC, and these volumes are tiny — one
+     * internal team messaging each other.
+     */
+    const rows = (data as DirectMessageRow[]).map(toDirectMessage);
+    const byPerson = new Map<string, DirectMessage[]>();
+    for (const m of rows) {
+      const other = m.senderId === personId ? m.recipientId : m.senderId;
+      const bucket = byPerson.get(other);
+      if (bucket) bucket.push(m);
+      else byPerson.set(other, [m]);
+    }
+
+    const conversations: Conversation[] = [...byPerson.entries()].map(
+      ([otherId, items]) => ({
+        personId: otherId,
+        // Query was newest-first, so the head of each bucket is the latest.
+        lastMessage: items[0],
+        messageCount: items.length,
+      }),
+    );
+    return conversations.sort((a, b) =>
+      b.lastMessage.createdAt.localeCompare(a.lastMessage.createdAt),
+    );
+  },
+
+  async listDirectMessages(personA, personB, limit = 200) {
+    const { data, error } = await client()
+      .from("direct_messages")
+      .select("*")
+      .or(
+        `and(sender_id.eq.${personA},recipient_id.eq.${personB}),` +
+          `and(sender_id.eq.${personB},recipient_id.eq.${personA})`,
+      )
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) {
+      if (isUnmatchableId(error)) return [];
+      fail("listDirectMessages");
+    }
+    return (data as DirectMessageRow[]).map(toDirectMessage).reverse();
+  },
+
+  async createDirectMessage(input) {
+    const { data, error } = await client()
+      .from("direct_messages")
+      .insert({
+        sender_id: input.senderId,
+        recipient_id: input.recipientId,
+        body: input.body,
+      })
+      .select("*")
+      .single();
+    if (error) fail("createDirectMessage");
+    return toDirectMessage(data as DirectMessageRow);
   },
 
   async listNews(limit) {
