@@ -34,8 +34,43 @@ export async function POST(request: Request) {
     );
   }
 
+  /*
+   * Reject an unknown assignee rather than storing a dangling reference. The
+   * dropdown is built from the roster, so this only fires on a hand-made
+   * request — which, on an open URL, is exactly what has to be handled.
+   */
+  if (parsed.data.assignedTo) {
+    const assignee = await store.getPerson(parsed.data.assignedTo);
+    if (!assignee) {
+      return Response.json(
+        { error: "That person is not on the roster", fields: { assignedTo: "Pick someone else" } },
+        { status: 400 },
+      );
+    }
+  }
+
   try {
     const lead = await store.createLead(parsed.data);
+
+    /*
+     * Tell the assignee. Not when they assigned it to themselves: being
+     * notified of your own action is noise, and it would leave a badge the
+     * person cannot explain.
+     */
+    if (lead.assignedTo && lead.assignedTo !== parsed.data.createdBy) {
+      await store.createNotifications([
+        {
+          personId: lead.assignedTo,
+          kind: "lead_assigned",
+          actorId: parsed.data.createdBy,
+          sourceId: lead.id,
+          href: `/leads/${lead.id}`,
+          // The hotel name, not the context: contact details stay off the bell.
+          preview: lead.hotelName,
+        },
+      ]);
+    }
+
     return Response.json({ id: lead.id }, { status: 201 });
   } catch {
     /*

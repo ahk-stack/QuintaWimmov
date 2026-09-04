@@ -266,7 +266,12 @@ export const fileStore: DataStore = {
         context: input.context ?? null,
         priority: input.priority ?? "normal",
         status: "new",
-        assignedTo: null,
+        /*
+         * Assigning at creation leaves the status "new": someone owns it, but
+         * they have not acted yet. The board's "unclaimed" count keys off
+         * assignedTo, so an assigned lead correctly drops out of it.
+         */
+        assignedTo: input.assignedTo ?? null,
         hubspotContactId: null,
         hubspotCompanyId: null,
         hubspotDealId: null,
@@ -284,6 +289,24 @@ export const fileStore: DataStore = {
         note: null,
         createdAt: now,
       });
+      /*
+       * A second event so the timeline shows the assignment, not just creation.
+       * One millisecond later than the creation event: sorting by createdAt
+       * alone would otherwise tie, and equal keys leave the order to sort
+       * stability rather than stating it.
+       */
+      if (lead.assignedTo) {
+        d.leadEvents.push({
+          id: randomUUID(),
+          leadId: lead.id,
+          actorId: input.createdBy,
+          type: "assigned",
+          fromStatus: null,
+          toStatus: null,
+          note: lead.assignedTo,
+          createdAt: new Date(new Date(now).getTime() + 1).toISOString(),
+        });
+      }
       return lead;
     });
   },
@@ -473,22 +496,31 @@ export const fileStore: DataStore = {
 
   async createNotifications(inputs) {
     if (inputs.length === 0) return;
-    await mutate((d) => {
-      const now = new Date().toISOString();
-      for (const input of inputs) {
-        d.notifications.push({
-          id: randomUUID(),
-          personId: input.personId,
-          kind: input.kind,
-          actorId: input.actorId,
-          sourceId: input.sourceId,
-          href: input.href,
-          preview: input.preview ?? null,
-          createdAt: now,
-          readAt: null,
-        });
-      }
-    });
+    /*
+     * Never throws, per the contract in store.ts. Without this the route
+     * handler would return 500 for a lead or message that was already
+     * persisted, and the person would retry and duplicate it.
+     */
+    try {
+      await mutate((d) => {
+        const now = new Date().toISOString();
+        for (const input of inputs) {
+          d.notifications.push({
+            id: randomUUID(),
+            personId: input.personId,
+            kind: input.kind,
+            actorId: input.actorId,
+            sourceId: input.sourceId,
+            href: input.href,
+            preview: input.preview ?? null,
+            createdAt: now,
+            readAt: null,
+          });
+        }
+      });
+    } catch {
+      console.warn("notification insert failed");
+    }
   },
 
   async listUnreadNotifications(personId, limit = 30) {

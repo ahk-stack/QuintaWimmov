@@ -40,6 +40,7 @@ const BADGE_CAP = 9;
 const KIND_LABEL: Record<NotificationKind, string> = {
   mention: "mentioned you",
   direct_message: "sent you a message",
+  lead_assigned: "assigned you a lead",
 };
 
 export function NotificationBell({

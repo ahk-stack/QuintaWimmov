@@ -56,6 +56,29 @@ export async function PATCH(
 
   try {
     const lead = await store.updateLead(id, patch, actorId);
+
+    /*
+     * Notify a newly assigned owner, on the same terms as assignment at
+     * creation: only on an actual change, and never when someone claims a lead
+     * for themselves.
+     */
+    if (
+      lead.assignedTo &&
+      lead.assignedTo !== existing.assignedTo &&
+      lead.assignedTo !== actorId
+    ) {
+      await store.createNotifications([
+        {
+          personId: lead.assignedTo,
+          kind: "lead_assigned",
+          actorId,
+          sourceId: lead.id,
+          href: `/leads/${lead.id}`,
+          preview: lead.hotelName,
+        },
+      ]);
+    }
+
     return Response.json({
       status: lead.status,
       assignedTo: lead.assignedTo,

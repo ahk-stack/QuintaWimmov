@@ -125,7 +125,10 @@ export interface DirectMessage {
   createdAt: string;
 }
 
-export type NotificationKind = "mention" | "direct_message";
+export type NotificationKind =
+  | "mention"
+  | "direct_message"
+  | "lead_assigned";
 
 /**
  * Something that should light up the bell.

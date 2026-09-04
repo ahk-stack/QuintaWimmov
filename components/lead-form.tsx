@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { DIRECTION_META } from "@/lib/status";
-import type { LeadDirection, LeadPriority } from "@/lib/types";
+import { DIRECTION_META, ROLE_LABEL } from "@/lib/status";
+import type { LeadDirection, LeadPriority, Person, Role } from "@/lib/types";
 
 import { useIdentity } from "./identity";
 import { Button } from "./ui";
@@ -66,11 +66,12 @@ function Field({
   );
 }
 
-export function LeadForm() {
+export function LeadForm({ people }: { people: Person[] }) {
   const router = useRouter();
   const { current, ready } = useIdentity();
 
   const [direction, setDirection] = useState<LeadDirection>("for_sales");
+  const [assignedTo, setAssignedTo] = useState("");
   const [priority, setPriority] = useState<LeadPriority>("normal");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -85,6 +86,8 @@ export function LeadForm() {
       createdBy: current.id,
       direction,
       priority,
+      // Empty string means unassigned; the schema normalises it to null.
+      assignedTo: assignedTo || null,
       hotelName: form.get("hotelName"),
       website: form.get("website"),
       city: form.get("city"),
@@ -123,6 +126,24 @@ export function LeadForm() {
       setSubmitting(false);
     }
   }
+
+  /*
+   * Role order follows the lead's direction: a lead FOR sales lists sales
+   * first, and vice versa. Recomputed when direction changes, so switching the
+   * picker reorders the dropdown.
+   */
+  const assignableGroups = (() => {
+    const order: Role[] =
+      direction === "for_sales"
+        ? ["sales", "consultant", "admin"]
+        : ["consultant", "sales", "admin"];
+    return order
+      .map((role) => ({
+        role,
+        members: people.filter((p) => p.active && p.role === role),
+      }))
+      .filter((group) => group.members.length > 0);
+  })();
 
   if (!ready) return null;
 
@@ -169,6 +190,48 @@ export function LeadForm() {
             );
           })}
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend className="text-xs font-bold tracking-[0.18em] uppercase">
+          Assign it
+        </legend>
+        <p className="mt-2 text-xs text-muted">
+          Optional. Left unassigned, it sits on the board for anyone to claim.
+          Whoever you pick gets a notification.
+        </p>
+
+        <label className="mt-4 block">
+          <span className="sr-only">Assign to</span>
+          <select
+            value={assignedTo}
+            onChange={(event) => setAssignedTo(event.target.value)}
+            className={INPUT_CLASS}
+          >
+            <option value="">Unassigned — anyone can claim it</option>
+            {/*
+              Grouped by role, with the side the lead is FOR listed first, since
+              that is who it is usually going to. Everyone stays selectable: a
+              consultant occasionally needs to hand something to an admin, and
+              hiding that would be a dead end rather than a safeguard.
+            */}
+            {assignableGroups.map((group) => (
+              <optgroup key={group.role} label={ROLE_LABEL[group.role]}>
+                {group.members.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name}
+                    {person.territory ? ` (${person.territory})` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        {fieldError.assignedTo ? (
+          <span className="mt-1.5 block text-xs font-bold text-status-lost">
+            {fieldError.assignedTo}
+          </span>
+        ) : null}
       </fieldset>
 
       <fieldset className="space-y-5">
