@@ -289,7 +289,12 @@ export const fileStore: DataStore = {
         note: null,
         createdAt: now,
       });
-      // A second event so the timeline shows the assignment, not just creation.
+      /*
+       * A second event so the timeline shows the assignment, not just creation.
+       * One millisecond later than the creation event: sorting by createdAt
+       * alone would otherwise tie, and equal keys leave the order to sort
+       * stability rather than stating it.
+       */
       if (lead.assignedTo) {
         d.leadEvents.push({
           id: randomUUID(),
@@ -299,7 +304,7 @@ export const fileStore: DataStore = {
           fromStatus: null,
           toStatus: null,
           note: lead.assignedTo,
-          createdAt: now,
+          createdAt: new Date(new Date(now).getTime() + 1).toISOString(),
         });
       }
       return lead;
@@ -491,22 +496,31 @@ export const fileStore: DataStore = {
 
   async createNotifications(inputs) {
     if (inputs.length === 0) return;
-    await mutate((d) => {
-      const now = new Date().toISOString();
-      for (const input of inputs) {
-        d.notifications.push({
-          id: randomUUID(),
-          personId: input.personId,
-          kind: input.kind,
-          actorId: input.actorId,
-          sourceId: input.sourceId,
-          href: input.href,
-          preview: input.preview ?? null,
-          createdAt: now,
-          readAt: null,
-        });
-      }
-    });
+    /*
+     * Never throws, per the contract in store.ts. Without this the route
+     * handler would return 500 for a lead or message that was already
+     * persisted, and the person would retry and duplicate it.
+     */
+    try {
+      await mutate((d) => {
+        const now = new Date().toISOString();
+        for (const input of inputs) {
+          d.notifications.push({
+            id: randomUUID(),
+            personId: input.personId,
+            kind: input.kind,
+            actorId: input.actorId,
+            sourceId: input.sourceId,
+            href: input.href,
+            preview: input.preview ?? null,
+            createdAt: now,
+            readAt: null,
+          });
+        }
+      });
+    } catch {
+      console.warn("notification insert failed");
+    }
   },
 
   async listUnreadNotifications(personId, limit = 30) {

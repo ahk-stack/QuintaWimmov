@@ -155,6 +155,15 @@ export interface DataStore {
   /**
    * Records notifications. Server-side only, and the caller is responsible for
    * never notifying someone about their own action.
+   *
+   * MUST NOT THROW. Every implementation swallows its own failures and logs
+   * instead.
+   *
+   * A notification is always a side effect of something more important that has
+   * already been persisted — a lead created, a message sent, an owner changed.
+   * If this threw, the route handler around it would return 500 for work that
+   * actually succeeded, and the person would retry and duplicate it. Losing a
+   * bell badge is a far smaller problem than that.
    */
   createNotifications(inputs: NewNotification[]): Promise<void>;
   /** Unread notifications for one person, newest first. */

@@ -382,12 +382,25 @@ export const supabaseStore: DataStore = {
 
     const lead = toLead(data as LeadRow);
 
+    /*
+     * Timestamps are set explicitly and one millisecond apart rather than left
+     * to the column default. Both rows go in one statement, so now() would give
+     * them the SAME created_at — and listLeadEvents orders by created_at alone,
+     * leaving Postgres free to return "assigned" before "created". The
+     * timeline would then read as though the lead were assigned before it
+     * existed. Distinct timestamps make the chronology real rather than relying
+     * on row order.
+     */
+    const createdAt = new Date(lead.createdAt);
+    const assignedAt = new Date(createdAt.getTime() + 1);
+
     const events: Record<string, unknown>[] = [
       {
         lead_id: lead.id,
         actor_id: input.createdBy,
         type: "created",
         to_status: "new",
+        created_at: createdAt.toISOString(),
       },
     ];
     // A second event so the timeline shows the assignment, not just creation.
@@ -397,6 +410,7 @@ export const supabaseStore: DataStore = {
         actor_id: input.createdBy,
         type: "assigned",
         note: lead.assignedTo,
+        created_at: assignedAt.toISOString(),
       });
     }
     await client().from("lead_events").insert(events);
