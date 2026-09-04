@@ -41,6 +41,8 @@ export interface NewLead {
   productInterest?: string | null;
   context?: string | null;
   priority?: Lead["priority"];
+  /** Optional owner at creation; null leaves the lead unclaimed. */
+  assignedTo?: string | null;
 }
 
 /** Fields a user may change after creation. Deliberately narrow. */

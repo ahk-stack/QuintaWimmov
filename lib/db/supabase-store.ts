@@ -369,6 +369,12 @@ export const supabaseStore: DataStore = {
         product_interest: input.productInterest ?? null,
         context: input.context ?? null,
         priority: input.priority ?? "normal",
+        /*
+         * Assigning at creation leaves the status "new": someone owns it, but
+         * they have not acted yet. The board's "unclaimed" count keys off
+         * assigned_to, so an assigned lead correctly drops out of it.
+         */
+        assigned_to: input.assignedTo ?? null,
       })
       .select("*")
       .single();
@@ -376,12 +382,24 @@ export const supabaseStore: DataStore = {
 
     const lead = toLead(data as LeadRow);
 
-    await client().from("lead_events").insert({
-      lead_id: lead.id,
-      actor_id: input.createdBy,
-      type: "created",
-      to_status: "new",
-    });
+    const events: Record<string, unknown>[] = [
+      {
+        lead_id: lead.id,
+        actor_id: input.createdBy,
+        type: "created",
+        to_status: "new",
+      },
+    ];
+    // A second event so the timeline shows the assignment, not just creation.
+    if (lead.assignedTo) {
+      events.push({
+        lead_id: lead.id,
+        actor_id: input.createdBy,
+        type: "assigned",
+        note: lead.assignedTo,
+      });
+    }
+    await client().from("lead_events").insert(events);
 
     return lead;
   },

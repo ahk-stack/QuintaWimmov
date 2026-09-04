@@ -266,7 +266,12 @@ export const fileStore: DataStore = {
         context: input.context ?? null,
         priority: input.priority ?? "normal",
         status: "new",
-        assignedTo: null,
+        /*
+         * Assigning at creation leaves the status "new": someone owns it, but
+         * they have not acted yet. The board's "unclaimed" count keys off
+         * assignedTo, so an assigned lead correctly drops out of it.
+         */
+        assignedTo: input.assignedTo ?? null,
         hubspotContactId: null,
         hubspotCompanyId: null,
         hubspotDealId: null,
@@ -284,6 +289,19 @@ export const fileStore: DataStore = {
         note: null,
         createdAt: now,
       });
+      // A second event so the timeline shows the assignment, not just creation.
+      if (lead.assignedTo) {
+        d.leadEvents.push({
+          id: randomUUID(),
+          leadId: lead.id,
+          actorId: input.createdBy,
+          type: "assigned",
+          fromStatus: null,
+          toStatus: null,
+          note: lead.assignedTo,
+          createdAt: now,
+        });
+      }
       return lead;
     });
   },

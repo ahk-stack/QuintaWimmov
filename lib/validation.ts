@@ -88,6 +88,17 @@ export const newLeadSchema = z.object({
   productInterest: optionalText(80),
   context: optionalText(4000),
   priority: z.enum(LEAD_PRIORITIES).default("normal"),
+  /*
+   * Optional at creation. Blank means nobody owns it yet and anyone can claim
+   * it from the board, which is the original behaviour and still the default.
+   */
+  assignedTo: z
+    .string()
+    .min(1)
+    .max(64)
+    .optional()
+    .nullable()
+    .transform((value) => (value && value.length > 0 ? value : null)),
 });
 
 export type NewLeadInput = z.infer<typeof newLeadSchema>;
