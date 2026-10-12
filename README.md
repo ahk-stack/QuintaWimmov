@@ -42,6 +42,13 @@ knowingly — never use it for real leads.
 
 Open http://localhost:3000.
 
+## Hosting
+
+Deployed on Vercel today. [`DEPLOYMENT.md`](./DEPLOYMENT.md) is the self-hosting
+handover: stack and versions, the five environment variables, migration order,
+firewall rules, health checks and known limitations. The app contains no
+Vercel-specific code, so moving it needs no code changes.
+
 ## Security model — read this
 
 **There is no sign-in.** Anyone with the URL can use the app. Identity is a name
