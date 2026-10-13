@@ -3,6 +3,10 @@
 Everything an ops engineer needs to run this app on Quinta infrastructure
 instead of Vercel. Written to be handed over as-is.
 
+**Repository:** `https://git.gotogo.im/scm/am/quinta-leads-hub.git`, branch
+`preprod`. That is the source of truth. A GitHub copy exists only as a temporary
+mirror feeding the current Vercel deployment.
+
 Verified against commit `511c7af` on 2026-09-04.
 
 ---
@@ -249,9 +253,10 @@ in a browser cookie and `localStorage`.
 7. Outbound HTTPS + **WSS** to `*.supabase.co` permitted for user browsers.
 8. `GET /api/health` returns 200.
 9. `npm run verify:rls` passes.
-10. Grep the built client assets for the service-role key and confirm it is
-    absent — CI does this on every build, and it is worth repeating after any
-    change to how environment variables are injected.
+10. `npm run check:bundle` passes after the build — it confirms the service-role
+    key is absent from every client asset. Run it again after any change to how
+    environment variables are injected. `npm run check` runs it together with
+    typecheck, lint, build and `npm audit`, and is the natural CI step.
 
 ## 11. What to ask us for
 

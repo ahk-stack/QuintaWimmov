@@ -44,7 +44,16 @@ Open http://localhost:3000.
 
 ## Hosting
 
-Deployed on Vercel today. [`DEPLOYMENT.md`](./DEPLOYMENT.md) is the self-hosting
+**Source of truth: Bitbucket**, `git.gotogo.im/scm/am/quinta-leads-hub`, branch
+`preprod`. Work goes in on a feature branch and merges into `preprod` by pull
+request.
+
+GitHub (`ahk-stack/QuintaWimmov`) is a **temporary mirror**: production still runs
+on Vercel, which deploys from it, so it keeps receiving `preprod` as `main` until
+Quinta's own hosting is live. After that it should be archived, not used for
+new work.
+
+[`DEPLOYMENT.md`](./DEPLOYMENT.md) is the self-hosting
 handover: stack and versions, the five environment variables, migration order,
 firewall rules, health checks and known limitations. The app contains no
 Vercel-specific code, so moving it needs no code changes.
@@ -104,11 +113,19 @@ without anyone running a command. `@codex review` as a PR comment triggers a run
 on demand. Note that automatic reviews only fire on pull requests opened after
 the setting is enabled.
 
-### CI
+### Checks
 
-GitHub Actions covers what Codex should not spend attention on: typecheck, lint,
-build, `npm audit`, a gitleaks history scan, CodeQL with `security-extended`, and
-an assertion that no server secret appears in the client bundle.
+```bash
+npm run check   # typecheck, lint, build, service-key bundle check, npm audit
+```
+
+Run it before opening a pull request. It is plain Node with no shell tools, so
+whatever CI the platform team wires to Bitbucket can call it as-is.
+
+`.github/workflows/` still runs on the GitHub mirror — those workflows add a
+gitleaks history scan and CodeQL `security-extended` on top. They do not run on
+Bitbucket. Until Bitbucket has CI of its own, those two exist only on the mirror,
+and should be ported (or replaced) when the mirror is retired.
 
 ## Brand
 

@@ -12,7 +12,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Internal web app for Quinta. Sales and consultants pass leads to each other,
 discuss them in chat, and read company news. Next.js 16 (App Router, Turbopack),
-Supabase Postgres, deployed on Vercel.
+Supabase Postgres. Source of truth is Bitbucket (`preprod`); GitHub is a temporary
+mirror that Vercel deploys from until Quinta's own hosting is live.
 
 ## The one thing to understand first
 

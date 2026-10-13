@@ -10,11 +10,13 @@
     "typecheck": "next typegen && tsc --noEmit",
     "review": "codex review --base main",
     "review:uncommitted": "codex review --uncommitted",
-    "verify:rls": "node scripts/verify-rls.mjs"
+    "verify:rls": "node scripts/verify-rls.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "check": "npm run typecheck && npm run lint && npm run build && npm run check:bundle && npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
-    "next": "16.3.4",
+    "next": "16.4.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
@@ -28,7 +30,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.4",
+    "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
