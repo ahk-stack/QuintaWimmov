@@ -48,3 +48,6 @@ next-env.d.ts
 
 # Plan and scratch files
 /.claude/settings.local.json
+
+# Infisical machine-identity config (contains client secret)
+infisical.config.json
