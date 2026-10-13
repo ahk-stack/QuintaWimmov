@@ -3,6 +3,10 @@
 Everything an ops engineer needs to run this app on Quinta infrastructure
 instead of Vercel. Written to be handed over as-is.
 
+**Repository:** `https://git.gotogo.im/scm/am/quinta-leads-hub.git`, branch
+`preprod`. That is the source of truth. A GitHub copy exists only as a temporary
+mirror feeding the current Vercel deployment.
+
 Verified against commit `511c7af` on 2026-09-04.
 
 ---
@@ -21,7 +25,7 @@ runs. Moving off Vercel needs no code changes.
 | Layer | Choice | Version |
 | --- | --- | --- |
 | Runtime | Node.js | **≥ 20.9** (`engines`). CI builds on 22; use 22 LTS. |
-| Framework | Next.js, App Router, Turbopack | 16.3.4 |
+| Framework | Next.js, App Router, Turbopack | 16.4.0 |
 | UI | React | 19.2.8 |
 | Language | TypeScript, `strict` | 5.x |
 | Styling | Tailwind CSS | 4.x |
@@ -249,9 +253,12 @@ in a browser cookie and `localStorage`.
 7. Outbound HTTPS + **WSS** to `*.supabase.co` permitted for user browsers.
 8. `GET /api/health` returns 200.
 9. `npm run verify:rls` passes.
-10. Grep the built client assets for the service-role key and confirm it is
-    absent — CI does this on every build, and it is worth repeating after any
-    change to how environment variables are injected.
+10. `npm run check` passes. It runs typecheck, lint, build, a check that the
+    service-role key is absent from the whole build output, and a production
+    dependency audit — the natural CI step. It needs no secrets: on a runner
+    with no key configured it builds with a sentinel value and searches for
+    that, so the leak check is real either way. Run it again after any change
+    to how environment variables are injected.
 
 ## 11. What to ask us for
 

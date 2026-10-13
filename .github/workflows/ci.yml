@@ -62,8 +62,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: npm audit
+      # Blocking: anything that ships to production.
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
+
+      # Reported, not blocking. Dev tooling can carry advisories with no
+      # upstream fix — braces <=3.0.3 via eslint-config-next has none at all —
+      # and none of it reaches production. Surface it without wedging every PR.
+      - name: npm audit (all, informational)
         run: npm audit --audit-level=high
+        continue-on-error: true
 
   secrets:
     name: Secret scan
