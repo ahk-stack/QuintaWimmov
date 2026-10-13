@@ -12,7 +12,7 @@
     "review:uncommitted": "codex review --uncommitted",
     "verify:rls": "node scripts/verify-rls.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
-    "check": "npm run typecheck && npm run lint && npm run build && npm run check:bundle && npm audit --omit=dev --audit-level=high"
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
@@ -25,6 +25,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@next/env": "^16.4.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

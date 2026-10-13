@@ -253,10 +253,12 @@ in a browser cookie and `localStorage`.
 7. Outbound HTTPS + **WSS** to `*.supabase.co` permitted for user browsers.
 8. `GET /api/health` returns 200.
 9. `npm run verify:rls` passes.
-10. `npm run check:bundle` passes after the build — it confirms the service-role
-    key is absent from every client asset. Run it again after any change to how
-    environment variables are injected. `npm run check` runs it together with
-    typecheck, lint, build and `npm audit`, and is the natural CI step.
+10. `npm run check` passes. It runs typecheck, lint, build, a check that the
+    service-role key is absent from every client asset, and a production
+    dependency audit — the natural CI step. It needs no secrets: on a runner
+    with no key configured it builds with a sentinel value and searches for
+    that, so the leak check is real either way. Run it again after any change
+    to how environment variables are injected.
 
 ## 11. What to ask us for
 

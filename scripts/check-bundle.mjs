@@ -7,29 +7,24 @@
  * server module into a client component would ship it silently; this catches
  * that after `next build`.
  *
- * Portable on purpose: plain Node, no shell tools, so it runs the same in any CI
- * (Bitbucket, Jenkins, GitHub Actions) and on Windows. Run after a build.
+ * FAILS CLOSED. With no key to search for it exits non-zero rather than
+ * "skipping": a clean CI runner has neither the variable nor .env.local, and a
+ * check that passes there has verified nothing. `npm run check` always supplies
+ * a value (the real key, or a sentinel it builds with), so use that; run this
+ * directly only after a build whose key you know.
  *
- * The key is read from the environment, falling back to .env.local. It is never
- * printed.
+ * The key is resolved with @next/env — the same loader, file precedence and
+ * dotenv syntax (quotes, comments, expansion) Next itself uses — so the string
+ * searched for is exactly the string Next would have had. It is never printed.
+ *
+ * Plain Node, no shell tools: runs the same in any CI and on Windows.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
-const STATIC_DIR = path.join(process.cwd(), ".next", "static");
+import nextEnv from "@next/env";
 
-function serviceKey() {
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
-  }
-  if (existsSync(".env.local")) {
-    for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-      const m = line.match(/^SUPABASE_SERVICE_ROLE_KEY=(.*)$/);
-      if (m && m[1].trim()) return m[1].trim();
-    }
-  }
-  return null;
-}
+const STATIC_DIR = path.join(process.cwd(), ".next", "static");
 
 function* files(dir) {
   for (const name of readdirSync(dir)) {
@@ -40,26 +35,35 @@ function* files(dir) {
 }
 
 if (!existsSync(STATIC_DIR)) {
-  console.error("check-bundle: .next/static not found — run `npm run build` first.");
+  console.error("check-bundle: FAIL — .next/static not found; build first.");
   process.exit(1);
 }
 
-const key = serviceKey();
-if (!key) {
-  /*
-   * Nothing to search for. Not a failure, because a build without the key is
-   * legitimate (the app then shows its setup screen) — but say so loudly rather
-   * than reporting a pass that checked nothing.
-   */
-  console.warn("check-bundle: SKIPPED — no SUPABASE_SERVICE_ROLE_KEY available to search for.");
-  process.exit(0);
+// Production semantics, matching `next build`. Explicit env vars win, as in Next.
+nextEnv.loadEnvConfig(process.cwd(), false, { info: () => {}, error: () => {} });
+const key = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
+
+if (key.length < 16) {
+  console.error(
+    "check-bundle: FAIL — no SUPABASE_SERVICE_ROLE_KEY to search for, so nothing " +
+      "would be verified. Run `npm run check`, which builds with a sentinel when no " +
+      "real key is configured.",
+  );
+  process.exit(1);
 }
 
 let scanned = 0;
 const leaks = [];
 for (const file of files(STATIC_DIR)) {
   scanned++;
-  if (readFileSync(file, "utf8").includes(key)) leaks.push(path.relative(process.cwd(), file));
+  if (readFileSync(file, "utf8").includes(key)) {
+    leaks.push(path.relative(process.cwd(), file));
+  }
+}
+
+if (scanned === 0) {
+  console.error("check-bundle: FAIL — .next/static is empty; the build did not produce client assets.");
+  process.exit(1);
 }
 
 if (leaks.length > 0) {
@@ -67,4 +71,5 @@ if (leaks.length > 0) {
   for (const f of leaks) console.error(`  ${f}`);
   process.exit(1);
 }
+
 console.log(`check-bundle: PASS — service-role key absent from ${scanned} client files.`);

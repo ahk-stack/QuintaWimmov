@@ -120,7 +120,9 @@ npm run check   # typecheck, lint, build, service-key bundle check, npm audit
 ```
 
 Run it before opening a pull request. It is plain Node with no shell tools, so
-whatever CI the platform team wires to Bitbucket can call it as-is.
+whatever CI the platform team wires to Bitbucket can call it as-is, and it needs
+no secrets: with no service-role key configured it builds with a sentinel value
+and checks the bundle for that instead.
 
 `.github/workflows/` still runs on the GitHub mirror — those workflows add a
 gitleaks history scan and CodeQL `security-extended` on top. They do not run on
