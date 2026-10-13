@@ -8,7 +8,8 @@
  * key is configured, this builds with a SENTINEL value in its place and searches
  * for that. Any code path that would leak the real key leaks the sentinel the
  * same way, so the check is meaningful with or without credentials, and never
- * needs the real secret in CI.
+ * needs the real secret in CI. Missing public Supabase values get placeholders
+ * for the same reason: the build must take the configured code path.
  *
  * Plain Node, no shell tools: identical on a Linux runner and on Windows.
  */
@@ -27,6 +28,11 @@ if (!(env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim()) {
   env.SUPABASE_SERVICE_ROLE_KEY = `check-sentinel-${randomUUID()}-${randomUUID()}`;
   usingSentinel = true;
 }
+// Without these, storeKind() is "unconfigured" and the build takes the
+// setup-screen bailout, so a leak on the configured path would never be built.
+// Placeholders only fill gaps; real values are never overridden.
+env.NEXT_PUBLIC_SUPABASE_URL ||= "https://placeholder.supabase.co";
+env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "placeholder-anon-key";
 
 console.log(
   usingSentinel
