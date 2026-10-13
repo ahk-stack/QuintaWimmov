@@ -1,6 +1,5 @@
 /**
- * Fails if the Supabase service-role key appears in anything the browser
- * downloads.
+ * Fails if the Supabase service-role key appears anywhere in the build output.
  *
  * The app has no sign-in, so that key is the only thing protecting lead contact
  * data, direct messages and notification previews. A refactor that pulls a
@@ -17,6 +16,18 @@
  * dotenv syntax (quotes, comments, expansion) Next itself uses — so the string
  * searched for is exactly the string Next would have had. It is never printed.
  *
+ * WHAT IS SCANNED: all of .next except the build caches — not just
+ * .next/static. A Server Component or a statically generated route that renders
+ * the key writes it into prerendered HTML/RSC on the server side of the tree,
+ * which is still served to browsers. Rather than track where a given Next
+ * version puts those files, everything is scanned. That cannot false-positive:
+ * Next never inlines a non-NEXT_PUBLIC variable into any artefact, server
+ * bundles included, so the key legitimately appears nowhere in the output.
+ *
+ * WHAT IS NOT: a dynamically rendered page that prints the key leaks it only at
+ * request time, after the build. No build-output check can see that; it is
+ * covered by code review and the AGENTS.md rules instead.
+ *
  * Plain Node, no shell tools: runs the same in any CI and on Windows.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -24,11 +35,15 @@ import path from "node:path";
 
 import nextEnv from "@next/env";
 
-const STATIC_DIR = path.join(process.cwd(), ".next", "static");
+const BUILD_DIR = path.join(process.cwd(), ".next");
+const STATIC_DIR = path.join(BUILD_DIR, "static");
+// Build caches and dev-server state: not output, and not shipped.
+const SKIP = new Set([path.join(BUILD_DIR, "cache"), path.join(BUILD_DIR, "dev")]);
 
 function* files(dir) {
   for (const name of readdirSync(dir)) {
     const full = path.join(dir, name);
+    if (SKIP.has(full)) continue;
     if (statSync(full).isDirectory()) yield* files(full);
     else yield full;
   }
@@ -54,7 +69,7 @@ if (key.length < 16) {
 
 let scanned = 0;
 const leaks = [];
-for (const file of files(STATIC_DIR)) {
+for (const file of files(BUILD_DIR)) {
   scanned++;
   if (readFileSync(file, "utf8").includes(key)) {
     leaks.push(path.relative(process.cwd(), file));
@@ -62,14 +77,14 @@ for (const file of files(STATIC_DIR)) {
 }
 
 if (scanned === 0) {
-  console.error("check-bundle: FAIL — .next/static is empty; the build did not produce client assets.");
+  console.error("check-bundle: FAIL — the build directory is empty.");
   process.exit(1);
 }
 
 if (leaks.length > 0) {
-  console.error(`check-bundle: FAIL — the service-role key is in ${leaks.length} client file(s):`);
+  console.error(`check-bundle: FAIL — the service-role key is in ${leaks.length} build file(s):`);
   for (const f of leaks) console.error(`  ${f}`);
   process.exit(1);
 }
 
-console.log(`check-bundle: PASS — service-role key absent from ${scanned} client files.`);
+console.log(`check-bundle: PASS — service-role key absent from all ${scanned} build files.`);

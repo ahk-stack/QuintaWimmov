@@ -99,7 +99,7 @@ the same Codex subscription without any GitHub link.
 ```bash
 npm install -g @openai/codex
 codex login          # "Sign in with ChatGPT"; no GitHub connector involved
-npm run review       # reviews the current branch against main
+npm run review       # reviews the current branch against preprod
 ```
 
 `npm run review:uncommitted` reviews staged, unstaged and untracked changes

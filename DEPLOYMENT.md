@@ -25,7 +25,7 @@ runs. Moving off Vercel needs no code changes.
 | Layer | Choice | Version |
 | --- | --- | --- |
 | Runtime | Node.js | **≥ 20.9** (`engines`). CI builds on 22; use 22 LTS. |
-| Framework | Next.js, App Router, Turbopack | 16.3.4 |
+| Framework | Next.js, App Router, Turbopack | 16.4.0 |
 | UI | React | 19.2.8 |
 | Language | TypeScript, `strict` | 5.x |
 | Styling | Tailwind CSS | 4.x |
@@ -254,7 +254,7 @@ in a browser cookie and `localStorage`.
 8. `GET /api/health` returns 200.
 9. `npm run verify:rls` passes.
 10. `npm run check` passes. It runs typecheck, lint, build, a check that the
-    service-role key is absent from every client asset, and a production
+    service-role key is absent from the whole build output, and a production
     dependency audit — the natural CI step. It needs no secrets: on a runner
     with no key configured it builds with a sentinel value and searches for
     that, so the leak check is real either way. Run it again after any change

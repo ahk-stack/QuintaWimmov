@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "review": "codex review --base main",
+    "review": "codex review --base preprod",
     "review:uncommitted": "codex review --uncommitted",
     "verify:rls": "node scripts/verify-rls.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
