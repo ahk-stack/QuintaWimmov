@@ -103,6 +103,16 @@ The app reads exactly five. Nothing else.
 | `NODE_ENV` | runtime | No | Must be `production`. |
 | `ALLOW_DEV_STORE` | runtime | No | **Leave unset.** See the warning below. |
 
+**Key format.** Since 16 Oct 2026 the project uses Supabase's new API keys.
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` holds the **publishable** key (`sb_publishable_…`)
+and `SUPABASE_SERVICE_ROLE_KEY` holds the **secret** key (`sb_secret_…`); the
+variable names are unchanged and `@supabase/supabase-js` accepts both formats.
+The legacy JWT keys (anon / service_role) can be disabled in the Supabase
+dashboard once every deployment uses the new ones. On Quinta's hosting the
+values live in Infisical (project `quinta-leads-hub`, env `preprod`); the
+publishable key is also a Bamboo plan variable, because it is inlined at build
+time.
+
 Phase 5 (HubSpot push, not yet built) will add `HUBSPOT_TOKEN`,
 `HUBSPOT_PIPELINE_ID` and `HUBSPOT_DEAL_STAGE_ID`, all server-only secrets.
 
