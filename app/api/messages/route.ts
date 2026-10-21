@@ -1,17 +1,63 @@
+import { z } from "zod";
+
+import { authorize, PRIVATE_HEADERS } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
 import { findMentions } from "@/lib/mentions";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforcePersonRateLimit } from "@/lib/rate-limit";
 import { fieldErrors, messageSchema } from "@/lib/validation";
 
+/*
+ * A message timestamp exactly as this API returned it. Checked strictly because
+ * it becomes a query filter.
+ */
+const cursorSchema = z
+  .string()
+  .max(40)
+  .regex(/^\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-]\d{2}:\d{2})$/)
+  .refine((v) => !Number.isNaN(Date.parse(v)));
+
 /**
- * Posts a chat message.
+ * New messages in a channel, for the chat window's polling.
  *
- * The browser subscribes to Realtime for reads, but writes come here so the
- * anon key never needs insert rights. Chat is the easiest endpoint to abuse on
- * an open URL, so the limit is tighter than the lead endpoints.
+ * Replaces the Supabase Realtime subscription, which needed the publishable key
+ * to be able to read `messages` — i.e. anyone, signed in or not. `after` is
+ * inclusive, so a message sharing the cursor's timestamp is never skipped; the
+ * client de-duplicates by id.
+ *
+ * Polls do not count as activity, so an unattended tab still times out.
+ */
+export async function GET(request: Request) {
+  const auth = await authorize(request, { touch: false });
+  if (!auth.ok) return auth.response;
+
+  const limited = enforcePersonRateLimit(auth.session.person.id, "messages:poll", 120, 60_000);
+  if (limited) return limited;
+
+  const url = new URL(request.url);
+  const channelId = url.searchParams.get("channelId") ?? "";
+  const after = cursorSchema.safeParse(url.searchParams.get("after"));
+  if (!channelId || channelId.length > 64 || !after.success) {
+    return Response.json({ error: "Invalid request" }, { status: 400, headers: PRIVATE_HEADERS });
+  }
+
+  try {
+    const messages = await getStore().listMessagesSince(channelId, after.data, 100);
+    return Response.json({ messages }, { headers: PRIVATE_HEADERS });
+  } catch {
+    return Response.json({ error: "Could not load messages" }, { status: 500, headers: PRIVATE_HEADERS });
+  }
+}
+
+/**
+ * Posts a chat message as the signed-in person. The limit is tighter than the
+ * lead endpoints because chat is the easiest thing to flood.
  */
 export async function POST(request: Request) {
-  const limited = enforceRateLimit(request, "messages:create", 30, 60_000);
+  const auth = await authorize(request);
+  if (!auth.ok) return auth.response;
+  const authorId = auth.session.person.id;
+
+  const limited = enforcePersonRateLimit(auth.session.person.id, "messages:create", 30, 60_000);
   if (limited) return limited;
 
   const payload = await request.json().catch(() => null);
@@ -24,14 +70,6 @@ export async function POST(request: Request) {
   }
 
   const store = getStore();
-
-  const author = await store.getPerson(parsed.data.authorId);
-  if (!author) {
-    return Response.json(
-      { error: "That name is not on the roster" },
-      { status: 400 },
-    );
-  }
 
   // Reject an unknown channel rather than storing a dangling reference.
   const channels = await store.listChannels();
@@ -47,13 +85,13 @@ export async function POST(request: Request) {
      */
     const people = await store.listPeople();
     const mentions = findMentions(parsed.data.body, people);
-    const message = await store.createMessage({ ...parsed.data, mentions });
+    const message = await store.createMessage({ ...parsed.data, authorId, mentions });
 
     /*
      * Notify the people mentioned, never the author. Being told you tagged
      * yourself is noise, and it would leave a badge nobody can explain.
      */
-    const recipients = mentions.filter((id) => id !== parsed.data.authorId);
+    const recipients = mentions.filter((id) => id !== authorId);
     if (recipients.length > 0) {
       const channelSlug =
         channels.find((c) => c.id === parsed.data.channelId)?.slug ?? "";
@@ -61,7 +99,7 @@ export async function POST(request: Request) {
         recipients.map((personId) => ({
           personId,
           kind: "mention" as const,
-          actorId: parsed.data.authorId,
+          actorId: authorId,
           sourceId: message.id,
           href: `/chat/${channelSlug}`,
           preview: parsed.data.body.slice(0, 160),

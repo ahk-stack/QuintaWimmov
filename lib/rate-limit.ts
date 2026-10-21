@@ -3,9 +3,10 @@ import "server-only";
 /**
  * Fixed-window rate limiting for the write endpoints.
  *
- * There is no sign-in, so anyone who learns the URL can POST. This is the only
- * thing standing between a bored visitor and a few thousand junk leads, or a
- * flood of HubSpot writes.
+ * Every write now needs a session, so this is defence in depth: it caps what a
+ * single compromised or misbehaving account can do, and it is the first, cheap
+ * gate in front of the login endpoint, where the shared database-backed
+ * throttle in lib/auth does the real work.
  *
  * Known limitation: the counters live in this process's memory. On Vercel each
  * serverless instance keeps its own, so the effective limit is per-instance
@@ -105,33 +106,26 @@ export function rateLimit(
 }
 
 /**
- * Best-effort client key.
+ * Best-effort client address.
  *
- * `x-forwarded-for` is set by the platform proxy in front of the app. It is
- * spoofable when the app is reached directly, so this identifies a caller well
- * enough to throttle honest mistakes and casual abuse, and no more.
+ * The LAST `x-forwarded-for` entry, not the first: each proxy appends the
+ * address it received the connection from, so the rightmost value is the one
+ * written by the proxy in front of this app, while anything to its left was
+ * supplied by the client and can be invented. On Vercel the header holds a
+ * single platform-set address. Self-hosted, the app must only be reachable
+ * through the reverse proxy, or this can be spoofed outright.
  */
-export function clientKey(request: Request, scope: string): string {
+export function clientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
-  const ip = forwarded?.split(",")[0]?.trim() || "unknown";
-  return `${scope}:${ip}`;
+  const parts = forwarded?.split(",").map((part) => part.trim()).filter(Boolean) ?? [];
+  return parts.at(-1) || request.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
-/**
- * Applies a limit and returns a 429 response when exceeded, or null to continue.
- */
-export function enforceRateLimit(
-  request: Request,
-  scope: string,
-  limit: number,
-  windowMs: number,
-): Response | null {
-  const { ok, retryAfterSeconds } = rateLimit(
-    clientKey(request, scope),
-    limit,
-    windowMs,
-  );
-  if (ok) return null;
+export function clientKey(request: Request, scope: string): string {
+  return `${scope}:${clientIp(request)}`;
+}
+
+function tooMany(retryAfterSeconds: number): Response {
   return Response.json(
     { error: "Too many requests. Wait a moment and try again." },
     {
@@ -139,4 +133,33 @@ export function enforceRateLimit(
       headers: { "Retry-After": String(retryAfterSeconds) },
     },
   );
+}
+
+/**
+ * Applies a limit keyed by client address and returns a 429 response when
+ * exceeded, or null to continue. For requests that have no session yet.
+ */
+export function enforceRateLimit(
+  request: Request,
+  scope: string,
+  limit: number,
+  windowMs: number,
+): Response | null {
+  const { ok, retryAfterSeconds } = rateLimit(clientKey(request, scope), limit, windowMs);
+  return ok ? null : tooMany(retryAfterSeconds);
+}
+
+/**
+ * Applies a limit keyed by the signed-in person. Used by every authenticated
+ * route: colleagues behind one office address must not share an allowance, or
+ * ordinary polling from a few dozen people would trip it.
+ */
+export function enforcePersonRateLimit(
+  personId: string,
+  scope: string,
+  limit: number,
+  windowMs: number,
+): Response | null {
+  const { ok, retryAfterSeconds } = rateLimit(`${scope}:person:${personId}`, limit, windowMs);
+  return ok ? null : tooMany(retryAfterSeconds);
 }

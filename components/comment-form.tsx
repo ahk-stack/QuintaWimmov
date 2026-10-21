@@ -35,7 +35,7 @@ export function CommentForm({ leadId }: { leadId: string }) {
       const response = await fetch(`/api/leads/${leadId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authorId: current!.id, body: trimmed }),
+        body: JSON.stringify({ body: trimmed }),
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));

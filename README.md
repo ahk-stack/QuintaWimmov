@@ -12,14 +12,15 @@ runs on Quinta's own monochrome brand rather than Wimmov's blue.
 | Area | Purpose |
 | --- | --- |
 | **Lead board** | Bidirectional. Sales post leads for consultants, consultants post leads for sales. Each lead carries a requester, an assignee and a status. |
-| **Chat** | Channel-based and live-updating, plus a discussion thread on every lead. |
+| **Chat** | Channels that update themselves, direct messages, @mentions, and a discussion thread on every lead. |
 | **News** | Quinta announcements feed. |
-| **HubSpot** | Accepted leads are pushed to HubSpot as contact + company + deal. |
+| **Accounts** | Username and password sign-in. Only admins create users, set or reset sign-ins, and delete users. |
+| **HubSpot** | Planned: accepted leads pushed to HubSpot as contact + company + deal. |
 
 ## Stack
 
 Next.js 16 (App Router, Turbopack) · TypeScript · Tailwind CSS 4 ·
-Supabase Postgres + Realtime · Vercel · HubSpot private app
+Supabase Postgres · Vercel (for now) · HubSpot private app (planned)
 
 ## Getting started
 
@@ -40,7 +41,16 @@ naming the missing variables rather than erroring on every route. For a
 throwaway demo with no database, `ALLOW_DEV_STORE=true` opts into the file store
 knowingly — never use it for real leads.
 
-Open http://localhost:3000.
+Open http://localhost:3000/api/health once (it creates the seeded dev store),
+then give the seeded admin a password:
+
+```bash
+npm run bootstrap-admin -- --email ahk@quinta.im --username akram.hkiri
+```
+
+It prompts for the password (hidden). With Supabase configured it writes to the
+database instead of the dev store. It refuses once anyone has a sign-in, unless
+run with `--force` — the documented recovery if the only admin is locked out.
 
 ## Hosting
 
@@ -54,34 +64,37 @@ Quinta's own hosting is live. After that it should be archived, not used for
 new work.
 
 [`DEPLOYMENT.md`](./DEPLOYMENT.md) is the self-hosting
-handover: stack and versions, the five environment variables, migration order,
+handover: stack and versions, the environment variables, migration order,
 firewall rules, health checks and known limitations. The app contains no
 Vercel-specific code, so moving it needs no code changes.
 
 ## Security model — read this
 
-**There is no sign-in.** Anyone with the URL can use the app. Identity is a name
-picked from a roster and stored in `localStorage`; it labels who did what, and is
-never trusted for authorisation.
+**Everyone signs in with a username and password, and only admins manage
+accounts.** Nobody creates their own account or changes their own password.
 
-That single decision drives the rest of the design:
+- **Sessions are server-side.** The cookie (`__Host-leadhub_session`, HttpOnly,
+  Secure, SameSite=Lax) holds a random token; the database holds only its
+  SHA-256. Sessions end after 2 hours idle or 12 hours in total, and are revoked
+  immediately on sign-out, password reset, role change or deletion.
+- **Who is acting always comes from the session.** No request body carries an
+  actor id. Every page calls `requireUser()` and every route handler calls
+  `authorize()`; `proxy.ts` only redirects for convenience.
+- **Passwords** are hashed with scrypt, at least 15 characters. Failed sign-ins
+  are throttled in the database, shared across instances, and every failure
+  looks the same, so the form does not reveal which usernames exist.
+- **Admin changes** need the admin's password re-entered within 10 minutes, run
+  as single database transactions that can never leave zero admins, and are
+  recorded in an audit log.
+- **The browser holds no Supabase key.** Chat polls the app instead of using
+  Supabase Realtime, and after migration 0008 the publishable key can read
+  nothing at all — `npm run verify:rls` proves it.
+- Cross-site requests are refused (Fetch Metadata + Origin + JSON only), and the
+  site is `noindex` with a blanket `Disallow`.
 
-- The `service_role` key and the HubSpot token are **server-only**. All writes go
-  through `app/api/*` route handlers.
-- Supabase runs with **RLS on and no permissive write policies**. The browser's
-  anon key can read `messages` and `channels` and nothing else.
-- The site sends `noindex` and a blanket `Disallow` in `robots.txt`, so the URL
-  never surfaces in search.
-- Record-creating endpoints are rate limited, because an open endpoint that
-  writes to HubSpot is an abuse surface.
-
-### Worth knowing
-
-An open URL holds prospect names, emails and phone numbers — third-party
-personal data, reachable by anyone who learns the URL. That is a GDPR exposure.
-If you want a floor under it without introducing accounts, set `ACCESS_CODE` in
-the environment: one shared word, prompted once, remembered 30 days. Blank means
-fully open, which is the current default and a deliberate choice.
+Direct messages are visible in the app only to their two participants.
+Database administrators can still read them, so they are not a place for
+passwords or personal data.
 
 ## Code review
 

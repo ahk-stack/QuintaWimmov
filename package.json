@@ -12,7 +12,8 @@
     "review:uncommitted": "codex review --uncommitted",
     "verify:rls": "node scripts/verify-rls.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "bootstrap-admin": "node scripts/bootstrap-admin.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

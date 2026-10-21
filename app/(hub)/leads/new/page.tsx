@@ -1,12 +1,14 @@
 import { LeadForm } from "@/components/lead-form";
 import { PageHeader } from "@/components/ui";
 import { getStore } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Post a lead" };
 
 export default async function NewLeadPage() {
+  await requireUser();
   const people = await getStore().listPeople();
 
   return (

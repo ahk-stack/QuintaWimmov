@@ -7,6 +7,18 @@
       "runtimeArgs": ["run", "dev"],
       "port": 65050,
       "autoPort": true
+    },
+    {
+      "name": "lead-hub-devstore",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "65061"],
+      "port": 65061,
+      "env": {
+        "SUPABASE_URL": "",
+        "NEXT_PUBLIC_SUPABASE_URL": "",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY": "",
+        "SUPABASE_SERVICE_ROLE_KEY": ""
+      }
     }
   ]
 }

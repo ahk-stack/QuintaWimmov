@@ -5,6 +5,7 @@ import { Markdown } from "@/components/markdown";
 import { Avatar, Tag } from "@/components/ui";
 import { getStore, storeKind } from "@/lib/db";
 import { formatDate } from "@/lib/format";
+import { getSession, requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,8 @@ export async function generateMetadata({
 }) {
   // Metadata runs outside the route-group layout, so it needs its own guard.
   if (storeKind() === "unconfigured") return { title: "News" };
+  // Signed-out visitors get a generic title, not a lead or person name.
+  if (!(await getSession())) return { title: "News" };
 
   const { slug } = await params;
   const item = await getStore().getNewsBySlug(slug);
@@ -30,6 +33,7 @@ export default async function NewsArticlePage({
 }: {
   params: Promise<{ slug: string }>;
 }) {
+  await requireUser();
   const { slug } = await params;
   const store = getStore();
 

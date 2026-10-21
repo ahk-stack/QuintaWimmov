@@ -46,7 +46,42 @@ import {
  * loud rather than silent, unless ALLOW_DEV_STORE=true opts into it knowingly.
  */
 
-interface Database {
+/*
+ * Sign-in collections. Rows mirror migration 0007; only lib/db/file-auth.ts
+ * reads or writes them.
+ */
+export interface CredentialRow {
+  personId: string;
+  username: string;
+  passwordHash: string;
+  passwordChangedAt: string;
+}
+
+export interface SessionRow {
+  id: string;
+  tokenHash: string;
+  personId: string;
+  createdAt: string;
+  expiresAt: string;
+  lastSeenAt: string;
+  reauthenticatedAt: string;
+}
+
+export interface ThrottleRow {
+  key: string;
+  attempts: number;
+  windowStartedAt: string;
+}
+
+export interface AuditRow {
+  id: string;
+  actorId: string | null;
+  targetId: string | null;
+  action: "bootstrap" | "user_created" | "user_updated" | "credentials_set" | "user_deleted";
+  createdAt: string;
+}
+
+export interface Database {
   people: Person[];
   leads: Lead[];
   leadEvents: LeadEvent[];
@@ -56,6 +91,10 @@ interface Database {
   directMessages: DirectMessage[];
   notifications: AppNotification[];
   news: NewsItem[];
+  credentials: CredentialRow[];
+  sessions: SessionRow[];
+  loginThrottle: ThrottleRow[];
+  adminAudit: AuditRow[];
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -74,6 +113,11 @@ function seedDatabase(): Database {
     directMessages: [],
     notifications: [],
     news: structuredClone(SEED_NEWS),
+    // No seeded credentials: set the first admin with scripts/bootstrap-admin.mjs.
+    credentials: [],
+    sessions: [],
+    loginThrottle: [],
+    adminAudit: [],
   };
 }
 
@@ -84,8 +128,8 @@ function assertUsable(): void {
   ) {
     throw new Error(
       "The file-backed development store cannot run in production. " +
-        "Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and " +
-        "SUPABASE_SERVICE_ROLE_KEY to use the Supabase store, or set " +
+        "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to use the " +
+        "Supabase store, or set " +
         "ALLOW_DEV_STORE=true to accept ephemeral local disk.",
     );
   }
@@ -126,6 +170,10 @@ function normalise(parsed: Partial<Database>): Database {
     directMessages: asList<DirectMessage>(parsed.directMessages),
     notifications: asList<AppNotification>(parsed.notifications),
     news: asList<NewsItem>(parsed.news),
+    credentials: asList<CredentialRow>(parsed.credentials),
+    sessions: asList<SessionRow>(parsed.sessions),
+    loginThrottle: asList<ThrottleRow>(parsed.loginThrottle),
+    adminAudit: asList<AuditRow>(parsed.adminAudit),
   };
 }
 
@@ -201,7 +249,7 @@ function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-async function mutate<T>(fn: (data: Database) => T | Promise<T>): Promise<T> {
+export async function mutate<T>(fn: (data: Database) => T | Promise<T>): Promise<T> {
   assertUsable();
   return withWriteLock(async () => {
     const data = await db();
@@ -211,7 +259,7 @@ async function mutate<T>(fn: (data: Database) => T | Promise<T>): Promise<T> {
   });
 }
 
-async function read<T>(fn: (data: Database) => T): Promise<T> {
+export async function read<T>(fn: (data: Database) => T): Promise<T> {
   assertUsable();
   return fn(await db());
 }
@@ -421,6 +469,16 @@ export const fileStore: DataStore = {
         .filter((m) => m.channelId === channelId)
         .sort(oldest)
         .slice(-limit),
+    );
+  },
+
+  async listMessagesSince(channelId, after, limit) {
+    const from = Date.parse(after);
+    return read((d) =>
+      d.messages
+        .filter((m) => m.channelId === channelId && Date.parse(m.createdAt) >= from)
+        .sort(oldest)
+        .slice(0, limit),
     );
   },
 

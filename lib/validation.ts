@@ -3,9 +3,10 @@ import { z } from "zod";
 /**
  * Request validation.
  *
- * Every route handler parses its body through one of these schemas. With no
- * sign-in, the request body is fully attacker-controlled, so nothing reaches the
- * store unvalidated and every field carries a length bound.
+ * Every route handler parses its body through one of these schemas, and nothing
+ * reaches the store unvalidated. No schema accepts an actor id: who is acting
+ * comes from the session, never from the body, so there is no field to forge.
+ * (zod drops unknown keys, so an old client still sending one is harmless.)
  */
 
 /** Trims, treats blank as absent, and normalises "" and undefined to null. */
@@ -70,8 +71,6 @@ export const LEAD_STATUSES = [
 export const LEAD_PRIORITIES = ["low", "normal", "high"] as const;
 
 export const newLeadSchema = z.object({
-  /** Attribution only. Checked against the roster, never trusted as identity. */
-  createdBy: z.string().min(1, "Pick your name first").max(64),
   direction: z.enum(LEAD_DIRECTIONS),
   hotelName: z
     .string()
@@ -105,7 +104,6 @@ export type NewLeadInput = z.infer<typeof newLeadSchema>;
 
 export const leadPatchSchema = z
   .object({
-    actorId: z.string().min(1).max(64),
     status: z.enum(LEAD_STATUSES).optional(),
     assignedTo: z.string().min(1).max(64).nullable().optional(),
     priority: z.enum(LEAD_PRIORITIES).optional(),
@@ -119,30 +117,81 @@ export const leadPatchSchema = z
   );
 
 export const leadCommentSchema = z.object({
-  authorId: z.string().min(1, "Pick your name first").max(64),
   body: z.string().trim().min(1, "Write something").max(4000),
 });
 
 export const messageSchema = z.object({
   channelId: z.string().min(1).max(64),
-  authorId: z.string().min(1, "Pick your name first").max(64),
   body: z.string().trim().min(1, "Write something").max(4000),
 });
 
 export const directMessageSchema = z.object({
-  senderId: z.string().min(1, "Pick your name first").max(64),
   recipientId: z.string().min(1, "Pick someone to message").max(64),
   body: z.string().trim().min(1, "Write something").max(4000),
 });
 
 export const newsSchema = z.object({
-  authorId: z.string().min(1, "Pick your name first").max(64),
   title: z.string().trim().min(3, "Give it a title").max(200),
   excerpt: optionalText(400),
   body: z.string().trim().min(1, "Write something").max(20000),
   category: optionalText(40),
   pinned: z.boolean().default(false),
 });
+
+// Sign-in and accounts ---------------------------------------------------------
+
+export const ROLES = ["sales", "consultant", "admin"] as const;
+
+/** Lower-cased so a username matches however it is typed. Same rule as the column. */
+export const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9._-]{3,32}$/, "3–32 characters: letters, digits, dot, dash or underscore");
+
+/*
+ * Deliberately loose. A login failure must look the same whatever was wrong, so
+ * format problems are not reported here; they simply fail to match anyone.
+ * Passwords are never trimmed: the password is exactly what was typed.
+ */
+export const loginSchema = z.object({
+  username: z.string().max(64),
+  password: z.string().max(1024),
+});
+
+export const reauthSchema = z.object({
+  password: z.string().max(1024),
+});
+
+export const profileSchema = z.object({
+  name: z.string().trim().min(1, "Give a name").max(160),
+  email: optionalEmail,
+  role: z.enum(ROLES),
+  territory: optionalText(16),
+});
+
+export const newUserSchema = profileSchema.extend({
+  username: usernameSchema,
+  password: z.string().max(1024),
+});
+
+export const credentialsSchema = z
+  .object({
+    username: usernameSchema.optional(),
+    password: z.string().max(1024).optional(),
+  })
+  .refine((v) => v.username !== undefined || v.password !== undefined, {
+    message: "Nothing to change",
+  });
+
+/** Avatar monogram from a name: first and last initials, as the roster does. */
+export function initialsFor(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letter = (word: string) => [...word][0]?.toUpperCase() ?? "";
+  const initials =
+    words.length > 1 ? letter(words[0]) + letter(words[words.length - 1]) : letter(words[0] ?? "");
+  return initials.length > 0 ? initials : "?";
+}
 
 /**
  * URL-safe slug from a title.

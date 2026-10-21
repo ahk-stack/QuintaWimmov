@@ -1,6 +1,10 @@
 /**
- * Verifies the deployed schema and, more importantly, that the anon key cannot
- * read or write anything it should not. Run against the live project.
+ * Verifies the deployed schema and, more importantly, that the publishable
+ * (anon) key cannot read, write or call anything. Run against the live project.
+ *
+ *   npm run verify:rls                  after migration 0008 (the normal case)
+ *   npm run verify:rls -- --pre-0008    between 0007 and 0008, while the old
+ *                                       chat policies still exist
  *
  * Reads credentials from .env.local and never prints them.
  */
@@ -11,9 +15,10 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);
   if (m) env[m[1]] = m[2].trim();
 }
-const URL_BASE = env.NEXT_PUBLIC_SUPABASE_URL;
+const URL_BASE = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL;
 const ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SVC = env.SUPABASE_SERVICE_ROLE_KEY;
+const PRE_LOCKDOWN = process.argv.includes("--pre-0008");
 
 const headers = (key, extra = {}) => ({
   apikey: key,
@@ -68,6 +73,10 @@ const TABLES = [
   "direct_messages",
   "notifications",
   "news",
+  "person_credentials",
+  "sessions",
+  "login_throttle",
+  "admin_audit",
 ];
 
 const pass = (b) => (b ? "PASS" : "FAIL <<<");
@@ -90,10 +99,19 @@ console.log("\n2. Channels seeded");
   check("3 channels present", slugs.length === 3, slugs.join(", "));
 }
 
-console.log("\n3. anon CAN read the two tables Realtime chat needs");
-for (const t of ["channels", "messages"]) {
-  const { status, body } = await get(`${t}?select=id`, ANON);
-  check(`anon reads ${t}`, status === 200 && Array.isArray(body), `HTTP ${status}`);
+if (PRE_LOCKDOWN) {
+  console.log("\n3. (pre-0008) anon can still read the two tables the old Realtime chat used");
+  for (const t of ["channels", "messages"]) {
+    const { status, body } = await get(`${t}?select=id`, ANON);
+    check(`anon reads ${t}`, status === 200 && Array.isArray(body), `HTTP ${status}`);
+  }
+} else {
+  console.log("\n3. anon reads NOTHING from chat (0008 removed the last two anon policies)");
+  for (const t of ["channels", "messages"]) {
+    const { status, body } = await get(`${t}?select=*`, ANON);
+    const rows = Array.isArray(body) ? body.length : -1;
+    check(`anon reads 0 from ${t}`, rows === 0, `${rows} row(s), HTTP ${status}`);
+  }
 }
 
 // Seed a temporary person + lead so the RLS read test has something to hide.
@@ -117,6 +135,20 @@ const personRes = await post("people", SVC, {
 });
 const personId = Array.isArray(personRes.body) ? personRes.body[0]?.id : null;
 check("temp person created", Boolean(personId), `HTTP ${personRes.status}`);
+
+/*
+ * A second probe: an admin by role but with NO sign-in. The admin functions
+ * must refuse them as an actor even under the service key — the database's own
+ * authorisation, independent of the app.
+ */
+const noLoginRes = await post("people", SVC, {
+  name: "RLS Probe Without Login",
+  email: `rls-probe-nologin-${Date.now()}@example.invalid`,
+  role: "admin",
+  initials: "RN",
+});
+const noLoginPersonId = Array.isArray(noLoginRes.body) ? noLoginRes.body[0]?.id : null;
+check("second temp person created", Boolean(noLoginPersonId), `HTTP ${noLoginRes.status}`);
 
 let leadId = null;
 if (personId) {
@@ -272,6 +304,106 @@ console.log("\n6c. THE NOTIFICATION BOUNDARY: previews quote message text, so an
   }
 }
 
+console.log("\n6d. THE SIGN-IN BOUNDARY: hashes, sessions and admin functions are server-only");
+{
+  const HASH_CANARY = `scrypt$15$8$3$cHJvYmVwcm9iZXByb2Jl$${"Y".repeat(43)}`;
+  const TOKEN_CANARY = "f".repeat(64);
+  let sessionId = null;
+
+  if (personId) {
+    const cred = await post("person_credentials", SVC, {
+      person_id: personId,
+      username: `rls.probe.${Date.now() % 100000}`,
+      password_hash: HASH_CANARY,
+    });
+    check("credential planted with service_role", cred.status < 300, `HTTP ${cred.status}`);
+    const sess = await post("sessions", SVC, {
+      token_hash: TOKEN_CANARY,
+      person_id: personId,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    sessionId = Array.isArray(sess.body) ? sess.body[0]?.id : null;
+    check("session planted with service_role", Boolean(sessionId), `HTTP ${sess.status}`);
+  }
+
+  for (const t of ["person_credentials", "sessions", "login_throttle", "admin_audit"]) {
+    const { status, body } = await get(`${t}?select=*`, ANON);
+    const rows = Array.isArray(body) ? body.length : -1;
+    const text = JSON.stringify(body ?? "");
+    check(
+      `anon reads 0 from ${t}`,
+      rows === 0 && !text.includes(HASH_CANARY) && !text.includes(TOKEN_CANARY),
+      `${rows} row(s), HTTP ${status}`,
+    );
+  }
+
+  const anonCred = await post("person_credentials", ANON, {
+    person_id: personId,
+    username: "anon.injected",
+    password_hash: HASH_CANARY,
+  });
+  check("anon INSERT into person_credentials refused", anonCred.status >= 400, `HTTP ${anonCred.status}`);
+  const anonSess = await post("sessions", ANON, {
+    token_hash: "e".repeat(64),
+    person_id: personId,
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+  check("anon INSERT into sessions refused", anonSess.status >= 400, `HTTP ${anonSess.status}`);
+
+  // PostgREST exposes every public function at /rpc; EXECUTE must be revoked.
+  const rpcCalls = {
+    admin_create_user: {
+      p_actor: personId, p_name: "Anon Admin", p_email: null, p_role: "admin",
+      p_territory: null, p_initials: "AA", p_username: "anon.admin", p_password_hash: HASH_CANARY,
+    },
+    admin_update_user: {
+      p_actor: personId, p_target: personId, p_name: "x", p_email: null, p_role: "admin",
+      p_territory: null, p_initials: "X",
+    },
+    admin_set_credentials: {
+      p_actor: personId, p_target: personId, p_username: "anon.x", p_password_hash: HASH_CANARY,
+    },
+    admin_delete_user: { p_actor: personId, p_target: personId },
+    bootstrap_set_credentials: { p_person: personId, p_username: "anon.boot", p_password_hash: HASH_CANARY, p_force: true },
+    auth_throttle_clear: { p_keys: ["ip:" + "0".repeat(64)] },
+    auth_throttle_hit: { p_keys: ["ip:" + "0".repeat(64)], p_window_seconds: 60 },
+  };
+  for (const [fn, args] of Object.entries(rpcCalls)) {
+    const r = await post(`rpc/${fn}`, ANON, args);
+    check(`anon cannot call ${fn}`, [401, 403, 404].includes(r.status), `HTTP ${r.status}`);
+  }
+
+  // The database itself refuses a non-admin actor, even under the service key.
+  if (noLoginPersonId && personId) {
+    const notAdmin = await post("rpc/admin_delete_user", SVC, { p_actor: noLoginPersonId, p_target: personId });
+    check(
+      "admin_delete_user refuses an actor who is not a signed-in admin",
+      notAdmin.status >= 400 && JSON.stringify(notAdmin.body ?? "").includes("LH_NOT_ADMIN"),
+      `HTTP ${notAdmin.status}`,
+    );
+  }
+
+  // Throttle round trip on throwaway keys: counts per key, in order, atomically.
+  const stamp = String(Date.now() % 100).padStart(2, "0");
+  const keyA = `ip:${"ab".repeat(31)}${stamp}`;
+  const keyB = `user:${"cd".repeat(31)}${stamp}`;
+  const first = await post("rpc/auth_throttle_hit", SVC, { p_keys: [keyA, keyB], p_window_seconds: 60 });
+  const second = await post("rpc/auth_throttle_hit", SVC, { p_keys: [keyB, keyA], p_window_seconds: 60 });
+  check("throttle counts each attempt", JSON.stringify(first.body) === "[1,1]", `got ${JSON.stringify(first.body)}`);
+  check("throttle returns counts in key order", JSON.stringify(second.body) === "[2,2]", `got ${JSON.stringify(second.body)}`);
+  const burst = await Promise.all(
+    Array.from({ length: 8 }, () => post("rpc/auth_throttle_hit", SVC, { p_keys: [keyA], p_window_seconds: 60 })),
+  );
+  const seen = burst.map((r) => (Array.isArray(r.body) ? r.body[0] : -1)).sort((a, b) => a - b);
+  check("concurrent attempts each get their own count", JSON.stringify(seen) === "[3,4,5,6,7,8,9,10]", JSON.stringify(seen));
+  await post("rpc/auth_throttle_clear", SVC, { p_keys: [keyA, keyB] });
+  const cleared = await post("rpc/auth_throttle_hit", SVC, { p_keys: [keyA], p_window_seconds: 60 });
+  check("throttle clears", JSON.stringify(cleared.body) === "[1]", `got ${JSON.stringify(cleared.body)}`);
+  await post("rpc/auth_throttle_clear", SVC, { p_keys: [keyA] });
+
+  if (sessionId) await del(`sessions?id=eq.${sessionId}`, SVC);
+}
+
 console.log("\n7. anon must NOT be able to write anywhere");
 {
   const chan = await get("channels?select=id&limit=1", SVC);
@@ -302,8 +434,11 @@ console.log("\n7. anon must NOT be able to write anywhere");
 
 console.log("\n8. Cleaning up the probe rows");
 if (leadId) check("lead deleted", (await del(`leads?id=eq.${leadId}`, SVC)) < 300);
+// Deleting the person cascades to the probe credential.
 if (personId)
   check("person deleted", (await del(`people?id=eq.${personId}`, SVC)) < 300);
+if (noLoginPersonId)
+  check("second person deleted", (await del(`people?id=eq.${noLoginPersonId}`, SVC)) < 300);
 {
   const { body } = await get("leads?select=id", SVC);
   const now = Array.isArray(body) ? body.length : -1;
@@ -312,6 +447,10 @@ if (personId)
     now === baselineLeads,
     `${now} row(s), baseline was ${baselineLeads}`,
   );
+}
+{
+  const { body } = await get(`person_credentials?select=person_id&person_id=eq.${personId}`, SVC);
+  check("probe credential gone with its person", Array.isArray(body) && body.length === 0);
 }
 
 console.log(

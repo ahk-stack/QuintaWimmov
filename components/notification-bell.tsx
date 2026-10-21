@@ -14,12 +14,10 @@ import { Avatar } from "./ui";
  *
  * Lights up when someone mentions you in a channel or sends you a direct
  * message. The count comes from /api/notifications, which resolves whose bell
- * it is from the identity cookie rather than a query parameter.
+ * it is from the session, never a parameter.
  *
- * Polled rather than pushed. Mentions could ride the existing Realtime channel
- * subscription, but direct messages cannot: `direct_messages` grants the anon
- * key nothing, on purpose, so there is no socket that can carry them. One
- * polling path for both is simpler than two mechanisms that behave differently.
+ * Polled rather than pushed: the browser holds no Supabase key, so there is no
+ * socket to push over. Polls do not count as activity for the idle timeout.
  */
 
 export interface BellItem {
@@ -50,7 +48,7 @@ export function NotificationBell({
 }: {
   people: Person[];
   /**
-   * Seeded on the server from the identity cookie, so the badge is correct on
+   * Seeded on the server from the session, so the badge is correct on
    * first paint instead of flashing empty. It also keeps the polling effect a
    * pure subscription, with no state written during the effect body.
    */
@@ -87,6 +85,12 @@ export function NotificationBell({
         // Never serve a stale count from the browser cache.
         cache: "no-store",
       });
+      if (response.status === 401) {
+        // Session ended (idle or absolute limit): on pages without chat this is
+        // the only recurring check, so it is what sends people to sign in.
+        router.replace("/login");
+        return;
+      }
       if (!response.ok) return;
       const data = await response.json();
       // Stamped with the identity this fetch was for, so a response that
@@ -98,7 +102,7 @@ export function NotificationBell({
     } catch {
       // Offline or a failed request leaves the previous count in place.
     }
-  }, []);
+  }, [router]);
 
   /*
    * Subscription only: a timer and a focus listener, both of which write state

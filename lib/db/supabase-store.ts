@@ -27,9 +27,9 @@ import {
  * Supabase-backed store.
  *
  * Runs under the service-role key, which bypasses RLS. That is the whole point:
- * the database denies the anon key everything except reading `channels` and
- * `messages`, and every write in the app arrives here from a route handler
- * instead. This module is `server-only` so it can never be pulled into a client
+ * the database denies the publishable key everything, and every read and write
+ * in the app arrives here from a server component or route handler that has
+ * already checked the session. This module is `server-only` so it can never be pulled into a client
  * bundle alongside that key.
  *
  * Column names are snake_case in Postgres and camelCase in the domain types, so
@@ -251,21 +251,33 @@ const toNews = (r: NewsRow): NewsItem => ({
 
 let cached: SupabaseClient | null = null;
 
+/**
+ * The project URL. `SUPABASE_URL` is the name going forward: since sign-in the
+ * browser holds no Supabase client, so nothing needs the URL in the bundle. The
+ * old `NEXT_PUBLIC_` name is still read so existing deployments keep working.
+ */
+export function supabaseUrl(): string | undefined {
+  return process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+}
+
 function client(): SupabaseClient {
   if (cached) return cached;
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = supabaseUrl();
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceRoleKey) {
     throw new Error("Supabase environment variables are missing");
   }
 
   cached = createClient(url, serviceRoleKey, {
-    // No user sessions exist, so there is nothing to persist or refresh.
+    // App sessions live in our own table; supabase-js keeps none of its own.
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return cached;
 }
+
+/** The service-role client, for the sign-in store. Server-only, like this file. */
+export const serviceClient = client;
 
 /**
  * Postgres errors quote the offending row, which for `leads` means prospect
@@ -291,6 +303,18 @@ const INVALID_TEXT_REPRESENTATION = "22P02";
 function isUnmatchableId(error: { code?: string } | null): boolean {
   return error?.code === INVALID_TEXT_REPRESENTATION;
 }
+
+/**
+ * A canonical uuid, and nothing else.
+ *
+ * `.or()` takes a filter STRING, so a value interpolated into it is parsed as
+ * PostgREST syntax: a crafted id like `x),id.not.is.null,or(id.is.null` would
+ * add its own conditions and return other people's direct messages. Every value
+ * that goes into such a string must pass this first; ids that cannot be a uuid
+ * cannot match a row anyway.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (value: string): boolean => UUID.test(value);
 
 /** Postgres: unique constraint violated. */
 const UNIQUE_VIOLATION = "23505";
@@ -566,6 +590,21 @@ export const supabaseStore: DataStore = {
     return (data as MessageRow[]).map(toMessage).reverse();
   },
 
+  async listMessagesSince(channelId, after, limit) {
+    const { data, error } = await client()
+      .from("messages")
+      .select("*")
+      .eq("channel_id", channelId)
+      .gte("created_at", after)
+      .order("created_at")
+      .limit(limit);
+    if (error) {
+      if (isUnmatchableId(error)) return [];
+      fail("listMessagesSince");
+    }
+    return (data as MessageRow[]).map(toMessage);
+  },
+
   async createMessage(input) {
     const { data, error } = await client()
       .from("messages")
@@ -583,9 +622,11 @@ export const supabaseStore: DataStore = {
 
   /*
    * Direct messages are read here, under the service-role key, because the
-   * table grants the anon key nothing. See migration 0004 for why.
+   * table grants the publishable key nothing. See migration 0004 for why.
    */
   async listConversations(personId) {
+    // Interpolated into a filter string below: uuid or nothing. See isUuid.
+    if (!isUuid(personId)) return [];
     const { data, error } = await client()
       .from("direct_messages")
       .select("*")
@@ -624,6 +665,8 @@ export const supabaseStore: DataStore = {
   },
 
   async listDirectMessages(personA, personB, limit = 200) {
+    // Interpolated into a filter string below: uuid or nothing. See isUuid.
+    if (!isUuid(personA) || !isUuid(personB)) return [];
     const { data, error } = await client()
       .from("direct_messages")
       .select("*")

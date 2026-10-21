@@ -1,25 +1,23 @@
-import { getClaimedPersonId } from "@/lib/current-person";
+import { authorize, PRIVATE_HEADERS } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforcePersonRateLimit } from "@/lib/rate-limit";
 
 /**
- * Unread notifications for whoever the identity cookie claims to be.
+ * Unread notifications for the signed-in person.
  *
- * Whose notifications is taken from the COOKIE, never from a query parameter.
- * A `?personId=` version of this would let anyone read another person's bell —
- * including direct-message previews — by editing a URL. Forging a cookie is no
- * harder in principle, but this is not an endpoint that can be enumerated, and
- * it keeps the shape honest for when a real sign-in lands.
+ * Whose bell is taken from the session, never from a parameter, so it cannot
+ * be pointed at someone else's direct-message previews.
  *
- * Polled by the bell, so the limit is generous but present.
+ * Polled by the bell, so the limit is generous, and polls do not count as
+ * activity for the idle timeout.
  */
 export async function GET(request: Request) {
-  const limited = enforceRateLimit(request, "notifications:read", 120, 60_000);
-  if (limited) return limited;
+  const auth = await authorize(request, { touch: false });
+  if (!auth.ok) return auth.response;
+  const personId = auth.session.person.id;
 
-  const personId = await getClaimedPersonId();
-  // Nobody claimed: an empty bell, not an error.
-  if (!personId) return Response.json({ count: 0, items: [] });
+  const limited = enforcePersonRateLimit(auth.session.person.id, "notifications:read", 120, 60_000);
+  if (limited) return limited;
 
   try {
     const items = await getStore().listUnreadNotifications(personId);
@@ -33,9 +31,9 @@ export async function GET(request: Request) {
         preview: n.preview,
         createdAt: n.createdAt,
       })),
-    });
+    }, { headers: PRIVATE_HEADERS });
   } catch {
     // A failing bell must not break the page it sits in.
-    return Response.json({ count: 0, items: [] }, { status: 200 });
+    return Response.json({ count: 0, items: [] }, { status: 200, headers: PRIVATE_HEADERS });
   }
 }

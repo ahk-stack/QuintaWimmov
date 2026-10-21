@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { ChatRoom } from "@/components/chat-room";
 import { ChatSidebar } from "@/components/chat-sidebar";
-import { getClaimedPerson } from "@/lib/current-person";
+import { getSession, requireUser } from "@/lib/auth/session";
 import { getStore, storeKind } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,8 @@ export async function generateMetadata({
    * guard exists to render.
    */
   if (storeKind() === "unconfigured") return { title: "Chat" };
+  // Signed-out visitors get a generic title, not a lead or person name.
+  if (!(await getSession())) return { title: "Chat" };
 
   const { slug } = await params;
   const channel = await getStore().getChannelBySlug(slug);
@@ -39,22 +41,21 @@ export default async function ChannelPage({
 }: {
   params: Promise<{ slug: string }>;
 }) {
+  const { person: me } = await requireUser();
   const { slug } = await params;
   const store = getStore();
 
-  const [channel, channels, people, claimed] = await Promise.all([
+  const [channel, channels, people] = await Promise.all([
     store.getChannelBySlug(slug),
     store.listChannels(),
     store.listPeople(),
-    // Attribution only — decides what to show, never what to allow.
-    getClaimedPerson(),
   ]);
 
   if (!channel) notFound();
 
   const [messages, conversations] = await Promise.all([
     store.listMessages(channel.id),
-    claimed ? store.listConversations(claimed.id) : Promise.resolve([]),
+    store.listConversations(me.id),
   ]);
 
   return (
@@ -64,7 +65,7 @@ export default async function ChannelPage({
         activeChannelSlug={channel.slug}
         conversations={conversations}
         people={people}
-        currentPerson={claimed}
+        currentPerson={me}
       />
 
       {/*

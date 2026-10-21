@@ -1,8 +1,11 @@
 import "server-only";
 
+import type { AuthStore } from "./auth-store";
+import { fileAuth } from "./file-auth";
 import { fileStore } from "./file-store";
 import type { DataStore } from "./store";
-import { supabaseStore } from "./supabase-store";
+import { supabaseAuth } from "./supabase-auth";
+import { supabaseStore, supabaseUrl } from "./supabase-store";
 
 export type {
   DataStore,
@@ -24,12 +27,12 @@ export type {
  * details and runs under the service-role key.
  */
 
+/*
+ * The publishable (anon) key is no longer required: since sign-in, the browser
+ * talks only to this app, never to Supabase. Only the URL and the server key.
+ */
 function supabaseConfigured(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  return Boolean(supabaseUrl() && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
 /**
@@ -70,6 +73,13 @@ export function getStore(): DataStore {
   const kind = storeKind();
   if (kind === "unconfigured") throw new StoreNotConfiguredError();
   return kind === "supabase" ? supabaseStore : fileStore;
+}
+
+/** The sign-in store matching `getStore()`. Same configuration rules. */
+export function getAuthStore(): AuthStore {
+  const kind = storeKind();
+  if (kind === "unconfigured") throw new StoreNotConfiguredError();
+  return kind === "supabase" ? supabaseAuth : fileAuth;
 }
 
 /** True when running on the local file store rather than a real database. */

@@ -70,7 +70,6 @@ export function NewsForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          authorId: current.id,
           title,
           body,
           pinned,

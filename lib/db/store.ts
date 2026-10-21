@@ -126,6 +126,12 @@ export interface DataStore {
   listChannels(): Promise<Channel[]>;
   getChannelBySlug(slug: string): Promise<Channel | null>;
   listMessages(channelId: string, limit?: number): Promise<Message[]>;
+  /**
+   * Messages at or after `after` (inclusive), oldest first. Drives chat
+   * polling; inclusive so a message sharing the cursor's timestamp is never
+   * missed, and the caller de-duplicates by id.
+   */
+  listMessagesSince(channelId: string, after: string, limit: number): Promise<Message[]>;
   createMessage(input: {
     channelId: string;
     authorId: string;

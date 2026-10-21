@@ -1,19 +1,23 @@
+import { authorize } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforcePersonRateLimit } from "@/lib/rate-limit";
 import { fieldErrors, leadPatchSchema } from "@/lib/validation";
 
 /**
  * Updates a lead's status, owner or priority, recording audit events.
  *
- * `actorId` labels who made the change. It is verified against the roster so the
- * timeline stays meaningful, but it authorises nothing: with no sign-in, anyone
- * with the URL can claim to be anyone, and the audit trail is honest about that.
+ * Any signed-in person may change any lead — the board is shared by design.
+ * The timeline records who did it, from the session.
  */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const limited = enforceRateLimit(request, "leads:update", 60, 60_000);
+  const auth = await authorize(request);
+  if (!auth.ok) return auth.response;
+  const actorId = auth.session.person.id;
+
+  const limited = enforcePersonRateLimit(auth.session.person.id, "leads:update", 60, 60_000);
   if (limited) return limited;
 
   const { id } = await params;
@@ -28,20 +32,12 @@ export async function PATCH(
   }
 
   const store = getStore();
-  const { actorId, ...patch } = parsed.data;
+  const patch = parsed.data;
 
-  const actor = await store.getPerson(actorId);
-  if (!actor) {
-    return Response.json(
-      { error: "That name is not on the roster" },
-      { status: 400 },
-    );
-  }
-
-  // Reject an unknown assignee rather than storing a dangling reference.
+  // Reject an unknown or removed assignee rather than storing a dangling reference.
   if (patch.assignedTo) {
     const assignee = await store.getPerson(patch.assignedTo);
-    if (!assignee) {
+    if (!assignee || !assignee.active) {
       return Response.json(
         { error: "That person is not on the roster" },
         { status: 400 },

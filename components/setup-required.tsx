@@ -22,8 +22,7 @@ export function SetupRequired() {
           Required
         </h2>
         <ul className="mt-3 space-y-1.5 font-mono text-sm">
-          <li>NEXT_PUBLIC_SUPABASE_URL</li>
-          <li>NEXT_PUBLIC_SUPABASE_ANON_KEY</li>
+          <li>SUPABASE_URL</li>
           <li>SUPABASE_SERVICE_ROLE_KEY</li>
         </ul>
         <p className="mt-4 text-sm text-muted">

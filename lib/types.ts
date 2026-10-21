@@ -113,9 +113,9 @@ export interface Message {
 /**
  * A message addressed to one person.
  *
- * "Direct", not "private". The table denies the anon key everything, so nothing
- * leaks through the public API — but the app has no sign-in, so anyone who
- * selects a name in the picker can read that person's messages. The UI says so.
+ * Shown in the app only to its two participants, by session. The table grants
+ * the publishable key nothing. Database administrators can still read it, and
+ * the UI says so.
  */
 export interface DirectMessage {
   id: string;

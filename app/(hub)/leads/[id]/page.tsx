@@ -15,6 +15,7 @@ import { displayHost, formatDate, formatDateTime } from "@/lib/format";
 import { DIRECTION_META, PRIORITY_META, STATUS_META } from "@/lib/status";
 import { hubspotSyncState } from "@/lib/types";
 import type { Lead, LeadEvent, Person } from "@/lib/types";
+import { getSession, requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,8 @@ export async function generateMetadata({
 }) {
   // Same reason as the chat route: metadata runs outside the layout guard.
   if (storeKind() === "unconfigured") return { title: "Lead" };
+  // Signed-out visitors get a generic title, not a lead or person name.
+  if (!(await getSession())) return { title: "Lead" };
 
   const { id } = await params;
   const lead = await getStore().getLead(id);
@@ -128,6 +131,7 @@ export default async function LeadDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireUser();
   const { id } = await params;
   const store = getStore();
 

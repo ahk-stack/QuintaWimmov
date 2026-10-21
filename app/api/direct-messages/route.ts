@@ -1,21 +1,49 @@
+import { authorize } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforcePersonRateLimit } from "@/lib/rate-limit";
 import { directMessageSchema, fieldErrors } from "@/lib/validation";
+
+/**
+ * The thread between the signed-in person and `?with=`, for the open
+ * conversation's polling. The reader is always the session's person — the
+ * parameter can only name the other participant, never swap in a reader.
+ * Polls do not count as activity, so an open thread still times out.
+ */
+export async function GET(request: Request) {
+  const auth = await authorize(request, { touch: false });
+  if (!auth.ok) return auth.response;
+
+  const limited = enforcePersonRateLimit(auth.session.person.id, "dm:poll", 120, 60_000);
+  if (limited) return limited;
+
+  const other = new URL(request.url).searchParams.get("with") ?? "";
+  // Ids are uuids (or short slugs in the dev store): never punctuation that a
+  // query builder could read as syntax. The store re-checks for Supabase.
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(other)) {
+    return Response.json({ error: "Invalid request" }, { status: 400 });
+  }
+
+  try {
+    const messages = await getStore().listDirectMessages(auth.session.person.id, other);
+    return Response.json({ messages });
+  } catch {
+    return Response.json({ error: "Could not load messages" }, { status: 500 });
+  }
+}
 
 /**
  * Sends a direct message.
  *
- * Reads and writes both happen server-side under the service-role key, because
- * `direct_messages` grants the anon key nothing. That is deliberate: the anon
- * key ships in the browser bundle, so an anon read policy on this table would
- * publish every conversation through the REST API. See migration 0004.
- *
- * It does NOT make messages confidential from colleagues. There is no sign-in,
- * so `senderId` is a name chosen from a dropdown and anyone can claim it. The UI
- * states this where people can see it.
+ * The sender is the signed-in person. Threads are shown only to their two
+ * participants, by session. Reads and writes happen server-side because
+ * `direct_messages` grants the publishable key nothing (migration 0004).
  */
 export async function POST(request: Request) {
-  const limited = enforceRateLimit(request, "dm:create", 30, 60_000);
+  const auth = await authorize(request);
+  if (!auth.ok) return auth.response;
+  const senderId = auth.session.person.id;
+
+  const limited = enforcePersonRateLimit(auth.session.person.id, "dm:create", 30, 60_000);
   if (limited) return limited;
 
   const payload = await request.json().catch(() => null);
@@ -27,7 +55,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { senderId, recipientId, body } = parsed.data;
+  const { recipientId, body } = parsed.data;
 
   // The database rejects this too; catching it here gives a usable message.
   if (senderId === recipientId) {
@@ -38,17 +66,8 @@ export async function POST(request: Request) {
   }
 
   const store = getStore();
-  const [sender, recipient] = await Promise.all([
-    store.getPerson(senderId),
-    store.getPerson(recipientId),
-  ]);
-  if (!sender) {
-    return Response.json(
-      { error: "That name is not on the roster" },
-      { status: 400 },
-    );
-  }
-  if (!recipient) {
+  const recipient = await store.getPerson(recipientId);
+  if (!recipient || !recipient.active) {
     return Response.json(
       { error: "That person is not on the roster" },
       { status: 404 },

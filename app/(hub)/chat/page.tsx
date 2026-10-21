@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { EmptyState, PageHeader } from "@/components/ui";
 import { getStore } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
  * the redirect server-side means no flash of an empty shell.
  */
 export default async function ChatIndexPage() {
+  await requireUser();
   const channels = await getStore().listChannels();
 
   if (channels.length > 0) {

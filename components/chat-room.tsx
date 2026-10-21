@@ -1,9 +1,9 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { dayKey, formatDate, formatTime } from "@/lib/format";
-import { getBrowserSupabase } from "@/lib/supabase-browser";
 import type { Channel, Message, Person } from "@/lib/types";
 
 import { findMentions } from "@/lib/mentions";
@@ -14,33 +14,16 @@ import { MessageComposer } from "./message-composer";
 import { Avatar } from "./ui";
 
 /**
- * A live chat channel.
+ * A chat channel that updates itself.
  *
- * Reads arrive over Supabase Realtime using the anon key, which RLS restricts
- * to `SELECT` on `messages` and `channels`. Writes go to /api/messages, so the
- * browser never needs insert rights.
+ * New messages come from polling GET /api/messages, which checks the session.
+ * This replaced a Supabase Realtime subscription: that needed the publishable
+ * key to read `messages`, which with sign-in in place would have let anyone
+ * read chat without signing in. Polling keeps every read behind the session.
  */
 
-/** Shape Realtime delivers: the raw row, snake_case. */
-interface MessageRow {
-  id: string;
-  channel_id: string;
-  author_id: string;
-  body: string;
-  created_at: string;
-  edited_at: string | null;
-  mentions: string[] | null;
-}
-
-const rowToMessage = (r: MessageRow): Message => ({
-  id: r.id,
-  channelId: r.channel_id,
-  authorId: r.author_id,
-  body: r.body,
-  createdAt: r.created_at,
-  editedAt: r.edited_at,
-  mentions: r.mentions ?? [],
-});
+/** Poll cadence while the tab is visible. */
+const POLL_MS = 4000;
 
 export function ChatRoom({
   channel,
@@ -52,6 +35,7 @@ export function ChatRoom({
   people: Person[];
 }) {
   const { current, ready } = useIdentity();
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [live, setLive] = useState(false);
 
@@ -64,8 +48,8 @@ export function ChatRoom({
   /**
    * Merges a message in, keyed by id.
    *
-   * The sender appends its own message on a successful POST and Realtime then
-   * echoes the same row back, so without keying by id every message the sender
+   * The sender appends its own message on a successful POST and the next poll
+   * returns the same row, so without keying by id every message the sender
    * writes would appear twice.
    */
   const upsert = useCallback((incoming: Message) => {
@@ -77,29 +61,55 @@ export function ChatRoom({
     });
   }, []);
 
-  // Realtime subscription, scoped to this channel.
+  /*
+   * The cursor is the newest timestamp the SERVER has given us, kept in a ref so
+   * polling does not restart on every message. A message sent from this tab is
+   * shown with a local timestamp, so it never moves the cursor; the next poll
+   * returns the stored row and the id-keyed upsert merges it.
+   */
+  const cursorRef = useRef<string>(
+    initialMessages.at(-1)?.createdAt ?? new Date(0).toISOString(),
+  );
+
   useEffect(() => {
-    const supabase = getBrowserSupabase();
-    if (!supabase) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const subscription = supabase
-      .channel(`room:${channel.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `channel_id=eq.${channel.id}`,
-        },
-        (payload) => upsert(rowToMessage(payload.new as MessageRow)),
-      )
-      .subscribe((status) => setLive(status === "SUBSCRIBED"));
+    async function poll() {
+      if (document.visibilityState === "visible") {
+        try {
+          const params = new URLSearchParams({
+            channelId: channel.id,
+            after: cursorRef.current,
+          });
+          const response = await fetch(`/api/messages?${params}`, { cache: "no-store" });
+          if (response.status === 401) {
+            // Session ended: send them to sign in, and stop polling.
+            router.replace("/login");
+            return;
+          }
+          if (response.ok) {
+            const { messages: fresh } = (await response.json()) as { messages: Message[] };
+            for (const message of fresh) upsert(message);
+            const newest = fresh.at(-1)?.createdAt;
+            if (newest) cursorRef.current = newest;
+            if (!stopped) setLive(true);
+          } else if (!stopped) {
+            setLive(false);
+          }
+        } catch {
+          if (!stopped) setLive(false);
+        }
+      }
+      if (!stopped) timer = setTimeout(poll, POLL_MS);
+    }
 
+    void poll();
     return () => {
-      void supabase.removeChannel(subscription);
+      stopped = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [channel.id, upsert]);
+  }, [channel.id, upsert, router]);
 
   // Keep the newest message in view as messages arrive.
   useEffect(() => {
@@ -118,7 +128,6 @@ export function ChatRoom({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channelId: channel.id,
-          authorId: current.id,
           body: trimmed,
         }),
       });
@@ -128,9 +137,9 @@ export function ChatRoom({
       }
       const { id } = await response.json();
       /*
-       * Show it immediately rather than waiting for the Realtime round trip, so
-       * the composer feels instant and still works if the socket is down. The
-       * id-keyed upsert makes the echo a no-op.
+       * Show it immediately rather than waiting for the next poll, so the
+       * composer feels instant. The id-keyed upsert makes the poll's copy a
+       * no-op.
        */
       upsert({
         id,

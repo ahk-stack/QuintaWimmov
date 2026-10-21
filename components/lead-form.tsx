@@ -83,7 +83,6 @@ export function LeadForm({ people }: { people: Person[] }) {
 
     const form = new FormData(event.currentTarget);
     const payload = {
-      createdBy: current.id,
       direction,
       priority,
       // Empty string means unassigned; the schema normalises it to null.

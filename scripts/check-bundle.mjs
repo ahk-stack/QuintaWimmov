@@ -1,10 +1,10 @@
 /**
  * Fails if the Supabase service-role key appears anywhere in the build output.
  *
- * The app has no sign-in, so that key is the only thing protecting lead contact
- * data, direct messages and notification previews. A refactor that pulls a
- * server module into a client component would ship it silently; this catches
- * that after `next build`.
+ * That key bypasses every database rule and sign-in alike: with it, anyone could
+ * read lead contact data, direct messages and password hashes directly. A
+ * refactor that pulls a server module into a client component would ship it
+ * silently; this catches that after `next build`.
  *
  * FAILS CLOSED. With no key to search for it exits non-zero rather than
  * "skipping": a clean CI runner has neither the variable nor .env.local, and a

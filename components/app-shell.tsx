@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import type { Person } from "@/lib/types";
 
-import { IdentityMenu, IdentityPrompt, IdentityProvider } from "./identity";
+import { IdentityProvider, UserMenu } from "./identity";
 import { NotificationBell, type BellItem } from "./notification-bell";
 import { NavLink } from "./nav-link";
 
@@ -21,19 +21,19 @@ const NAV = [
  */
 export function AppShell({
   people,
+  me,
   initialNotifications,
-  claimedPersonId,
   children,
 }: {
   people: Person[];
-  /** Seeded server-side from the identity cookie; see NotificationBell. */
+  /** The signed-in person, from the session. */
+  me: Person;
+  /** Seeded server-side from the session; see NotificationBell. */
   initialNotifications: BellItem[];
-  /** Who those notifications belong to, per the cookie the server saw. */
-  claimedPersonId: string | null;
   children: React.ReactNode;
 }) {
   return (
-    <IdentityProvider people={people}>
+    <IdentityProvider people={people} me={me}>
       <header className="sticky top-0 z-30 border-b border-line bg-paper/95 backdrop-blur">
         {/*
           Wraps rather than scrolls. Inline on one row the logo and identity
@@ -73,14 +73,12 @@ export function AppShell({
             <NotificationBell
               people={people}
               initialItems={initialNotifications}
-              initialOwnerId={claimedPersonId}
+              initialOwnerId={me.id}
             />
-            <IdentityMenu />
+            <UserMenu />
           </div>
         </div>
       </header>
-
-      <IdentityPrompt />
 
       <div className="flex-1">
         <div className="mx-auto w-full max-w-6xl px-6 py-12">{children}</div>

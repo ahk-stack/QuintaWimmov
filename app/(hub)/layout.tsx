@@ -1,13 +1,16 @@
 import { AppShell } from "@/components/app-shell";
 import type { BellItem } from "@/components/notification-bell";
 import { SetupRequired } from "@/components/setup-required";
-import { getClaimedPersonId } from "@/lib/current-person";
+import { requireUser } from "@/lib/auth/session";
 import { getStore, storeKind } from "@/lib/db";
 
 /*
- * The shell needs the roster for the identity picker, so this layout reads the
- * store and is therefore request-time rather than prerendered. Kept in a route
+ * Request-time: it resolves the session and reads the roster. Kept in a route
  * group so the root layout stays static and `robots.txt` still prerenders.
+ *
+ * Redirecting signed-out visitors here is a convenience, NOT the protection. A
+ * layout does not stop its pages from rendering, so every page and route
+ * handler checks the session itself.
  */
 export const dynamic = "force-dynamic";
 
@@ -26,33 +29,30 @@ export default async function HubLayout({
     return <SetupRequired />;
   }
 
+  const { person: me } = await requireUser();
   const store = getStore();
-  const [people, claimedId] = await Promise.all([
-    store.listPeople(),
-    // Attribution only — decides what to show, never what to allow.
-    getClaimedPersonId(),
-  ]);
+  const people = await store.listPeople();
 
   /*
    * Seeded here so the bell's badge is correct on first paint rather than
    * flashing empty, and so its polling effect stays a pure subscription.
    */
-  const notifications: BellItem[] = claimedId
-    ? (await store.listUnreadNotifications(claimedId)).map((n) => ({
+  const notifications: BellItem[] = (await store.listUnreadNotifications(me.id)).map(
+    (n) => ({
         id: n.id,
         kind: n.kind,
         actorId: n.actorId,
         href: n.href,
         preview: n.preview,
-        createdAt: n.createdAt,
-      }))
-    : [];
+      createdAt: n.createdAt,
+    }),
+  );
 
   return (
     <AppShell
       people={people}
+      me={me}
       initialNotifications={notifications}
-      claimedPersonId={claimedId}
     >
       {children}
     </AppShell>

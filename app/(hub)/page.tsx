@@ -13,6 +13,7 @@ import {
 import { getStore } from "@/lib/db";
 import { formatDate, isWithinDays, markdownLede } from "@/lib/format";
 import { DIRECTION_META, isOpen } from "@/lib/status";
+import { requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ const WON_WINDOW_DAYS = 30;
 const RECENT_LEADS = 6;
 
 export default async function DashboardPage() {
+  await requireUser();
   const store = getStore();
   const [people, leads, news, channels] = await Promise.all([
     store.listPeople(),

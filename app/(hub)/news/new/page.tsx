@@ -1,9 +1,11 @@
 import { NewsForm } from "@/components/news-form";
 import { PageHeader } from "@/components/ui";
+import { requireUser } from "@/lib/auth/session";
 
 export const metadata = { title: "Write a post" };
 
-export default function NewNewsPage() {
+export default async function NewNewsPage() {
+  await requireUser();
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { dayKey, formatDate, formatTime } from "@/lib/format";
 import type { DirectMessage, Person } from "@/lib/types";
@@ -13,10 +13,11 @@ import { Avatar } from "./ui";
 /**
  * A direct-message thread.
  *
- * Unlike channels there is no Realtime subscription, because `direct_messages`
- * grants the anon key nothing — an anon read policy would publish every
- * conversation through the REST API. New messages arrive by asking the server
- * to re-render instead, which keeps the contents behind the service-role key.
+ * New messages come from polling GET /api/direct-messages, which only ever
+ * returns the thread between the signed-in person and `other`. Polls do not
+ * count as activity, so a thread left open still lets the session time out —
+ * which a page refresh would not. `direct_messages` grants the publishable key
+ * nothing.
  */
 
 /** Poll cadence. Slow enough to be cheap, fast enough to feel like a chat. */
@@ -34,21 +35,36 @@ export function DirectThread({
   const router = useRouter();
   const { current, ready } = useIdentity();
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [messages, setMessages] = useState<DirectMessage[]>(initialMessages);
 
-  // Keep the newest message in view when the server sends more.
+  // Keep the newest message in view as more arrive.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [initialMessages.length]);
+  }, [messages.length]);
 
-  /*
-   * router.refresh() re-runs the server component, which re-reads the thread.
-   * Paused while the tab is hidden so a forgotten tab does not poll all day.
-   */
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `/api/direct-messages?with=${encodeURIComponent(other.id)}`,
+        { cache: "no-store" },
+      );
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (response.ok) {
+        const { messages: thread } = (await response.json()) as { messages: DirectMessage[] };
+        setMessages(thread);
+      }
+    } catch {
+      // Offline for a moment; the next tick tries again.
+    }
+  }, [other.id, router]);
+
+  // Paused while the tab is hidden so a forgotten tab does not poll all day.
   useEffect(() => {
-    if (!current) return;
-
     const tick = () => {
-      if (document.visibilityState === "visible") router.refresh();
+      if (document.visibilityState === "visible") void load();
     };
     const timer = window.setInterval(tick, REFRESH_MS);
     document.addEventListener("visibilitychange", tick);
@@ -56,7 +72,7 @@ export function DirectThread({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [router, current]);
+  }, [load]);
 
   async function send(body: string): Promise<string | null> {
     if (!current) return "Pick your name in the top right first.";
@@ -65,7 +81,6 @@ export function DirectThread({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          senderId: current.id,
           recipientId: other.id,
           body,
         }),
@@ -74,8 +89,8 @@ export function DirectThread({
         const result = await response.json().catch(() => ({}));
         return result.error ?? "Could not send that";
       }
-      // The server re-render is the source of truth for the thread.
-      router.refresh();
+      // The server's copy of the thread is the source of truth.
+      await load();
       return null;
     } catch {
       return "Could not reach the server.";
@@ -84,14 +99,14 @@ export function DirectThread({
 
   const grouped = useMemo(() => {
     const groups: { day: string; items: DirectMessage[] }[] = [];
-    for (const message of initialMessages) {
+    for (const message of messages) {
       const day = dayKey(message.createdAt);
       const last = groups.at(-1);
       if (last && last.day === day) last.items.push(message);
       else groups.push({ day, items: [message] });
     }
     return groups;
-  }, [initialMessages]);
+  }, [messages]);
 
   const peopleById = useMemo(
     () => new Map(people.map((p) => [p.id, p])),
@@ -116,15 +131,15 @@ export function DirectThread({
           Stated where it matters rather than buried in a policy page. Someone
           about to type something sensitive should see this first.
         */}
-        <p className="mt-4 rounded-lg border border-status-watch px-3 py-2 text-xs text-status-watch">
-          <span className="font-bold">Not confidential.</span> The app has no
-          sign-in, so anyone who picks your name can read this. Keep anything
-          sensitive out of it.
+        <p className="mt-4 text-xs text-muted">
+          Only you and {other.name} see this conversation in the app. Quinta
+          administrators of the underlying database can still access it, so
+          keep passwords and personal data out of chat.
         </p>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-6">
-        {initialMessages.length === 0 ? (
+        {messages.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted">
             No messages yet. Say hello.
           </p>

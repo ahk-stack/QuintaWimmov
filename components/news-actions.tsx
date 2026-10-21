@@ -6,9 +6,8 @@ import { ButtonLink } from "./ui";
 /**
  * Shows the publish link only to admins.
  *
- * Presentational only. The API enforces the same rule server-side, because
- * anyone can select an admin identity from the picker — hiding a button is not
- * access control, and is not treated as such.
+ * Presentational only. The API checks the signed-in person's role itself;
+ * hiding a button is not access control.
  */
 export function NewsActions() {
   const { current, ready } = useIdentity();

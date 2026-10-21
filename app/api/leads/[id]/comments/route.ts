@@ -1,5 +1,6 @@
+import { authorize } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforcePersonRateLimit } from "@/lib/rate-limit";
 import { fieldErrors, leadCommentSchema } from "@/lib/validation";
 
 /** Adds a comment to a lead's discussion thread. */
@@ -7,7 +8,10 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const limited = enforceRateLimit(request, "leads:comment", 40, 60_000);
+  const auth = await authorize(request);
+  if (!auth.ok) return auth.response;
+
+  const limited = enforcePersonRateLimit(auth.session.person.id, "leads:comment", 40, 60_000);
   if (limited) return limited;
 
   const { id } = await params;
@@ -23,14 +27,6 @@ export async function POST(
 
   const store = getStore();
 
-  const author = await store.getPerson(parsed.data.authorId);
-  if (!author) {
-    return Response.json(
-      { error: "That name is not on the roster" },
-      { status: 400 },
-    );
-  }
-
   const lead = await store.getLead(id);
   if (!lead) {
     return Response.json({ error: "Lead not found" }, { status: 404 });
@@ -39,7 +35,7 @@ export async function POST(
   try {
     const comment = await store.createLeadComment({
       leadId: id,
-      authorId: parsed.data.authorId,
+      authorId: auth.session.person.id,
       body: parsed.data.body,
     });
     return Response.json({ id: comment.id }, { status: 201 });

@@ -17,34 +17,63 @@ mirror that Vercel deploys from until Quinta's own hosting is live.
 
 ## The one thing to understand first
 
-**There is no sign-in.** Anyone with the URL can use the app. Identity is a name
-picked from a roster and kept in `localStorage` — it is an attribution label, not
-an authentication claim, and must never be trusted for authorisation.
+**Everyone signs in; only admins manage accounts.** Sessions are server-side
+(`lib/auth/session.ts`): the cookie holds a random token, the `sessions` table
+holds its SHA-256, and every request re-checks it. Who is acting comes from the
+session and nothing else. The browser is still hostile by assumption — a signed-in
+user can send any request their browser can.
 
-Everything in the security rules below follows from that. The browser is hostile
-by assumption.
+The browser holds no Supabase key at all. Everything it sees comes through this
+app, under a checked session.
 
 ## Code Review Rules
+
+### Authentication and authorisation
+- Every route handler starts with `authorize(request, …)` from `lib/auth/guard.ts`
+  (login and logout use `isSameOriginRequest` directly). A handler that reads or
+  writes the store without it is a finding.
+- Every page under `app/(hub)` calls `requireUser()` itself. The layout's check
+  and `proxy.ts` are conveniences — a layout does not stop its pages rendering —
+  so relying on either is a finding.
+- The actor is always `auth.session.person.id`. A schema or handler that accepts
+  an actor id (`createdBy`, `authorId`, `senderId`, `actorId`, …) from the body
+  or query is a finding.
+- Admin-only actions pass `{ admin: true }`; account changes also pass
+  `{ reauth: true }`. Account changes go through the Postgres functions in
+  migration 0007, which re-check the actor and the last-admin rule inside one
+  transaction. Re-implementing those checks as separate queries is a finding.
+- Login failures must stay indistinguishable: same status, same body, and one
+  KDF — real or dummy — for every attempt that is not throttled. Throttled
+  attempts skip the KDF by design (they are throttled by address, which reveals
+  nothing about an account). An error that says "unknown user", "locked" or
+  similar is a finding, as is a per-account counter that blocks the right
+  password (that hands out a lockout of any known colleague).
+- Throttle counts are taken atomically BEFORE the password is checked
+  (`auth_throttle_hit`); check-then-record lets a burst slip past the limit.
+- Changing a password ends every session of that person, the requester's own
+  included.
+- Never log or return passwords, password hashes, session tokens or their hashes.
+- Authenticated responses carry `Cache-Control: private, no-store`.
 
 ### Secrets must never reach the client
 - `SUPABASE_SERVICE_ROLE_KEY` and `HUBSPOT_TOKEN` are server-only. Flag any use
   inside a file carrying `"use client"`, any re-export that could be reached from
   one, and any attempt to expose either through a `NEXT_PUBLIC_*` variable.
-- Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` may be
-  public. Any other `NEXT_PUBLIC_*` addition deserves scrutiny.
+- No `NEXT_PUBLIC_*` variable is needed by the app any more. Adding one, or any
+  browser Supabase client, deserves scrutiny.
 
-### All writes go through route handlers
-- Client components must not write to Supabase directly. Mutations belong in
-  `app/api/*/route.ts` (or a server action) using the server-side client.
-- The client's only permitted direct Supabase use is the Realtime subscription
-  for reading `messages`.
+### All reads and writes go through the server
+- Client components never talk to Supabase. Reads happen in server components
+  or route handlers; mutations in `app/api/*/route.ts`.
 
 ### Database access control
-- Every new table ships with RLS enabled and **no** permissive write policy for
-  `anon`. A migration that creates a table without an accompanying RLS statement
-  is a finding.
-- Read policies for `anon` are only acceptable on `messages` and `channels`, and
-  only for `SELECT`.
+- Every new table ships with RLS enabled and forced, **no** policies for `anon`
+  or `authenticated`, and its grants to them revoked. A migration that creates a
+  table without that is a finding.
+- No `anon` policy of any kind is acceptable (0008 removed the last two).
+- Every new function in `public` must `revoke execute … from public, anon,
+  authenticated` and grant only `service_role`: PostgREST exposes it at `/rpc`.
+- Run `npm run verify:rls` after any migration.
 
 ### Route-level guards do not cover metadata
 - `generateMetadata` runs outside the route-group layout, so the `storeKind()`
@@ -62,9 +91,11 @@ by assumption.
 - API error responses return a generic message plus a status code. Detail stays
   server-side.
 
-### The open URL is an abuse surface
+### Abuse limits
 - Endpoints that create records — lead submission and HubSpot push especially —
   must be rate limited. A new unthrottled mutation endpoint is a finding.
+- Login and password confirmation are throttled in the database
+  (`lib/auth/login.ts`), not only in memory, so the limit holds across instances.
 - HubSpot writes must search for an existing contact by email before creating
   one. A create-blind write duplicates CRM records.
 

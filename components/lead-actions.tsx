@@ -40,7 +40,7 @@ export function LeadActions({
       const response = await fetch(`/api/leads/${lead.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actorId: current.id, ...body }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));

@@ -4,12 +4,14 @@ import { NewsActions } from "@/components/news-actions";
 import { Avatar, Card, EmptyState, PageHeader, Tag } from "@/components/ui";
 import { getStore } from "@/lib/db";
 import { formatDate, markdownLede } from "@/lib/format";
+import { requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Quinta news" };
 
 export default async function NewsPage() {
+  await requireUser();
   const store = getStore();
   const [items, people] = await Promise.all([
     store.listNews(),

@@ -9,9 +9,8 @@ import { NewDirectMessage } from "./new-direct-message";
 /**
  * Channel list plus direct-message conversations.
  *
- * Conversations are rendered from the identity cookie server-side, so this page
- * never has to expose an endpoint that would let anyone list another person's
- * threads.
+ * Conversations are rendered server-side for the signed-in person, so there is
+ * no endpoint that could be pointed at someone else's threads.
  */
 export function ChatSidebar({
   channels,
@@ -104,7 +103,7 @@ export function ChatSidebar({
           </>
         ) : (
           <p className="text-xs text-muted">
-            Pick your name in the top right to send a direct message.
+            Sign in to send a direct message.
           </p>
         )}
       </div>

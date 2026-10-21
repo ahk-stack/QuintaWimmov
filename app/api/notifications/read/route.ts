@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { getClaimedPersonId } from "@/lib/current-person";
+import { authorize } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforcePersonRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   /** Omit to mark everything unread as read. */
@@ -10,18 +10,19 @@ const bodySchema = z.object({
 });
 
 /**
- * Marks notifications read for whoever the cookie claims to be.
+ * Marks the signed-in person's notifications read.
  *
- * The person is resolved from the cookie and always applied in the store query,
+ * The person comes from the session and is always applied in the store query,
  * so passing another person's notification ids is a no-op rather than a way to
  * clear their bell.
  */
 export async function POST(request: Request) {
-  const limited = enforceRateLimit(request, "notifications:mark", 60, 60_000);
-  if (limited) return limited;
+  const auth = await authorize(request);
+  if (!auth.ok) return auth.response;
+  const personId = auth.session.person.id;
 
-  const personId = await getClaimedPersonId();
-  if (!personId) return Response.json({ marked: 0 });
+  const limited = enforcePersonRateLimit(auth.session.person.id, "notifications:mark", 60, 60_000);
+  if (limited) return limited;
 
   const payload = await request.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(payload ?? {});

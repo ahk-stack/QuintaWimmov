@@ -10,6 +10,7 @@ import {
   isOpen,
 } from "@/lib/status";
 import type { LeadDirection, LeadStatus } from "@/lib/types";
+import { requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,7 @@ export default async function LeadsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await requireUser();
   const params = await searchParams;
   const direction = parseDirection(first(params.direction));
   const status = parseStatus(first(params.status));
