@@ -330,10 +330,13 @@ console.log("\n6d. THE SIGN-IN BOUNDARY: hashes, sessions and admin functions ar
     const { status, body } = await get(`${t}?select=*`, ANON);
     const rows = Array.isArray(body) ? body.length : -1;
     const text = JSON.stringify(body ?? "");
+    // Grants are revoked as well as RLS forced, so a refusal (401/403) is the
+    // expected answer here — stricter than an empty list, and equally safe.
+    const refused = status === 401 || status === 403;
     check(
-      `anon reads 0 from ${t}`,
-      rows === 0 && !text.includes(HASH_CANARY) && !text.includes(TOKEN_CANARY),
-      `${rows} row(s), HTTP ${status}`,
+      `anon gets nothing from ${t}`,
+      (refused || rows === 0) && !text.includes(HASH_CANARY) && !text.includes(TOKEN_CANARY),
+      refused ? `refused, HTTP ${status}` : `${rows} row(s), HTTP ${status}`,
     );
   }
 
