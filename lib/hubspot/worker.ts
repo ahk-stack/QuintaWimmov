@@ -57,21 +57,35 @@ export async function runHubSpotSweep(limit = 5): Promise<number> {
         if (!claim) break;
         try {
           const { warning } = await syncLead(claim);
-          // False: the lease expired at the last moment. The lead stays queued
-          // and is synced again from its current state; nothing is lost.
-          await store.hubspotComplete(claim.leadId, claim.leaseToken, claim.revision, warning);
+          // False: the lease expired after our writes. Another worker may have
+          // written newer values first, so queue the current state again.
+          if (!(await store.hubspotComplete(claim.leadId, claim.leaseToken, claim.revision, warning))) {
+            await store.hubspotRequeue(claim.leadId);
+          }
         } catch (error) {
-          if (error instanceof LeaseLost) continue; // another worker has it now
+          if (error instanceof LeaseLost) {
+            // Another worker has it now. If we had already written to HubSpot,
+            // queue it again so the current state is written last.
+            if (error.afterWrite) {
+              await store.hubspotRequeue(claim.leadId).catch(() => console.warn(`hubspot sync: could not requeue lead=${claim.leadId}`));
+            }
+            continue;
+          }
           const known = error instanceof HubSpotError;
           const code = known ? error.code : "internal";
           // Ids and codes only: never contact details, bodies or messages.
           console.warn(`hubspot sync failed: lead=${claim.leadId} code=${code}`);
-          await store
-            .hubspotFail(claim.leadId, claim.leaseToken, code, {
+          try {
+            const recorded = await store.hubspotFail(claim.leadId, claim.leaseToken, code, {
               retryable: known ? error.retryable : true,
               blocked: code === "no_contact",
-            })
-            .catch(() => console.warn(`hubspot sync: could not record failure for lead=${claim.leadId}`));
+            });
+            // Lease gone: a write of ours (e.g. one that timed out) may still
+            // land after a newer worker's. Queue the current state again.
+            if (!recorded) await store.hubspotRequeue(claim.leadId);
+          } catch {
+            console.warn(`hubspot sync: could not record failure for lead=${claim.leadId}`);
+          }
         }
         processed++;
         // A full round may mean more are due; go round again.

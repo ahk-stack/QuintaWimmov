@@ -144,6 +144,18 @@ export interface DataStore {
     code: HubSpotErrorCode,
     options: { retryable: boolean; blocked: boolean },
   ): Promise<boolean>;
+  /**
+   * Saves the Deal id (write-once) and, when `outcome` is given, the outcome
+   * just written to the Deal (null clears it). False if the lease was lost.
+   */
+  hubspotSaveDeal(
+    leadId: string,
+    leaseToken: string,
+    dealId: string | null,
+    outcome?: { value: "won" | "lost" | null },
+  ): Promise<boolean>;
+  /** Re-queue after a write whose lease turned out to be lost (see migration 0010). */
+  hubspotRequeue(leadId: string): Promise<void>;
   /** The saved HubSpot note id, which the Lead type does not carry. */
   hubspotNoteId(leadId: string): Promise<string | null>;
   /**

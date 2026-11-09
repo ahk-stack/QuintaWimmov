@@ -40,6 +40,10 @@ export function hubspotLeadUrl(hubspotLeadId: string): string {
   return `https://${HUBSPOT_UI_DOMAIN}/contacts/${HUBSPOT_PORTAL_ID}/record/0-136/${encodeURIComponent(hubspotLeadId)}`;
 }
 
+export function hubspotDealUrl(hubspotDealId: string): string {
+  return `https://${HUBSPOT_UI_DOMAIN}/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${encodeURIComponent(hubspotDealId)}`;
+}
+
 /*
  * These look like placeholders but are the real ids: HubSpot keeps literal ids
  * such as "lead-pipeline-id" and "connected-stage-id" for the default Lead
@@ -61,11 +65,27 @@ export const STAGE_FOR_STATUS: Record<LeadStatus, string> = {
   lost: "unqualified-stage-id", // Disqualified
 };
 
-/** HubSpot-defined association type ids (documented, direction matters). */
+/**
+ * Deals go into "Pipeline des ventes" (`default`) at Target, and only the
+ * outcome is synced afterwards: won → Contract signed, lost → Contract lost.
+ * Middle stages belong to sales in HubSpot.
+ */
+export const DEAL_PIPELINE_ID = "default";
+export const DEAL_START_STAGE = "qualifiedtobuy"; // Target
+export const DEAL_STAGE_FOR_OUTCOME = {
+  won: "closedwon", // Contract signed
+  lost: "closedlost", // Contract lost
+} as const;
+
+/** HubSpot-defined association type ids (verified in the portal; direction matters). */
 export const ASSOC = {
   leadToPrimaryContact: 578,
   leadToPrimaryCompany: 580,
+  leadToPrimaryDeal: 582,
   noteToLead: 855,
+  noteToDeal: 214,
+  dealToContact: 3,
+  dealToPrimaryCompany: 5,
   contactToPrimaryCompany: 1,
 } as const;
 

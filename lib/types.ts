@@ -94,6 +94,15 @@ export interface Lead {
   hubspotCompanyId: string | null;
   /** The HubSpot Lead (object 0-136) this lead became. */
   hubspotLeadId: string | null;
+  /** The HubSpot Deal created alongside it, in "Pipeline des ventes". */
+  hubspotDealId: string | null;
+  /**
+   * The outcome last written to the Deal's stage. Only a change is written, so
+   * stages sales set by hand in HubSpot are not overwritten later.
+   */
+  hubspotDealOutcome: "won" | "lost" | null;
+  /** When the lead last reached won/lost (set by the database). The Deal's close date. */
+  outcomeAt: string | null;
   hubspotSyncedAt: string | null;
   hubspotSyncState: HubSpotSyncState;
   /** A fixed code, never a HubSpot message. See HubSpotErrorCode. */

@@ -6,7 +6,15 @@ import { getStore } from "../db";
 import type { HubSpotClaim } from "../db/store";
 import type { HubSpotErrorCode, Lead, Person } from "../types";
 import { HubSpotError, hubspotRequest } from "./client";
-import { ASSOC, EXTERNAL_ID_PROPERTY, LEAD_PIPELINE_ID, STAGE_FOR_STATUS } from "./config";
+import {
+  ASSOC,
+  DEAL_PIPELINE_ID,
+  DEAL_STAGE_FOR_OUTCOME,
+  DEAL_START_STAGE,
+  EXTERNAL_ID_PROPERTY,
+  LEAD_PIPELINE_ID,
+  STAGE_FOR_STATUS,
+} from "./config";
 
 /**
  * Syncs one claimed lead to HubSpot, app → HubSpot only.
@@ -23,11 +31,19 @@ import { ASSOC, EXTERNAL_ID_PROPERTY, LEAD_PIPELINE_ID, STAGE_FOR_STATUS } from 
  *      primary company is never changed;
  *   4. the Lead, at its stage, with this lead's id in `quinta_lead_hub_id`
  *      (a unique property: a duplicate create is rejected and adopted);
- *   5. a note on the Lead, carrying a reference marker so a retry finds it
- *      instead of adding a second.
+ *   5. a Deal in "Pipeline des ventes" at Target (or already closed if the
+ *      lead was won/lost first), found by `quinta_lead_hub_id` before any
+ *      create, linked to the contact, the company and the Lead;
+ *   6. a note on the Lead and the Deal, carrying a reference marker so a
+ *      retry finds it instead of adding a second.
  * Existing contacts and companies are never modified.
  *
- * Later syncs only set the Lead's stage and owner from the CURRENT lead.
+ * Later syncs set the Lead's stage and owner, and the Deal's owner, from the
+ * CURRENT lead — the app is the authority for ownership. The Deal's stage is
+ * written only when the app's OUTCOME changes (won → Contract signed, lost →
+ * Contract lost); sales own the stages in between, and reopening a lead in the
+ * app does not reopen its Deal. Association links are re-asserted with
+ * idempotent PUTs on every sync, so an interrupted one is completed next time.
  *
  * Before every HubSpot write the lease is renewed; if it has expired another
  * worker may own the lead, so this one stops without writing.
@@ -47,8 +63,16 @@ interface SearchResult {
   results: { id: string }[];
 }
 
-/** Thrown when the lease was lost mid-sync: another worker owns the lead now. */
-export class LeaseLost extends Error {}
+/**
+ * Thrown when the lease was lost mid-sync: another worker owns the lead now.
+ * `afterWrite` means something was already written to HubSpot under the stale
+ * lease, so the lead must be queued again to restore the current state.
+ */
+export class LeaseLost extends Error {
+  constructor(public readonly afterWrite: boolean) {
+    super("HubSpot sync lease lost");
+  }
+}
 
 /** Another worker is creating this lead's company right now: try again shortly. */
 const companyBusy = () => new HubSpotError("company_busy", null, true, false);
@@ -294,12 +318,20 @@ export async function syncLead(claim: HubSpotClaim): Promise<SyncOutcome> {
   if (!lead) throw new HubSpotError("internal", null, false, false);
   if (!lead.contactEmail) throw new HubSpotError("no_contact", null, false, false);
 
+  /*
+   * Set once anything has been written to HubSpot in this run. Every write
+   * below goes through guard() first, so after the first guard we treat the
+   * run as having written.
+   */
+  let wrote = false;
+
   // Before every HubSpot write: still ours? If not, stop without writing.
   const guard = async () => {
-    if (!(await store.hubspotRenew(lead.id, claim.leaseToken, STEP_LEASE_SECONDS))) throw new LeaseLost();
+    if (!(await store.hubspotRenew(lead.id, claim.leaseToken, STEP_LEASE_SECONDS))) throw new LeaseLost(wrote);
+    wrote = true;
   };
   const saveIds = async (ids: { contactId?: string; companyId?: string; leadId?: string; noteId?: string }) => {
-    if (!(await store.hubspotSaveIds(lead.id, claim.leaseToken, ids))) throw new LeaseLost();
+    if (!(await store.hubspotSaveIds(lead.id, claim.leaseToken, ids))) throw new LeaseLost(wrote);
   };
 
   const people = new Map((await store.listPeople()).map((p) => [p.id, p]));
@@ -310,6 +342,8 @@ export async function syncLead(claim: HubSpotClaim): Promise<SyncOutcome> {
   const stage = STAGE_FOR_STATUS[lead.status];
 
   let hubspotLeadId = lead.hubspotLeadId;
+  let companyId = lead.hubspotCompanyId;
+  let contactId = lead.hubspotContactId;
   // An existing Lead (from a previous sync, or adopted below) gets stage and owner set.
   let needsUpdate = hubspotLeadId !== null;
 
@@ -327,12 +361,10 @@ export async function syncLead(claim: HubSpotClaim): Promise<SyncOutcome> {
 
   if (!hubspotLeadId) {
     // 2–3. Company, then contact.
-    let companyId = lead.hubspotCompanyId;
     if (!companyId) {
       companyId = await findOrCreateCompany(lead, guard);
       if (companyId) await saveIds({ companyId });
     }
-    let contactId = lead.hubspotContactId;
     if (!contactId) {
       contactId = await findOrCreateContact(lead, companyId, guard);
       await saveIds({ contactId });
@@ -355,7 +387,7 @@ export async function syncLead(claim: HubSpotClaim): Promise<SyncOutcome> {
           },
           associations: [
             {
-              to: { id: contactId },
+              to: { id: contactId as string },
               types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: ASSOC.leadToPrimaryContact }],
             },
             ...(companyId
@@ -400,11 +432,141 @@ export async function syncLead(claim: HubSpotClaim): Promise<SyncOutcome> {
     );
   }
 
-  // 5. The note, once.
-  if (hubspotLeadId && !(await store.hubspotNoteId(lead.id))) {
+  // 5. The Deal, once the Lead exists.
+  const outcome = lead.status === "won" || lead.status === "lost" ? lead.status : null;
+  let hubspotDealId = lead.hubspotDealId;
+  let dealCreated = false;
+
+  const saveDeal = async (dealId: string | null, recorded?: { value: "won" | "lost" | null }) => {
+    if (!(await store.hubspotSaveDeal(lead.id, claim.leaseToken, dealId, recorded))) throw new LeaseLost(wrote);
+  };
+  const adoptDeal = async (): Promise<boolean> => {
+    const existing = await search("deals", EXTERNAL_ID_PROPERTY, lead.id);
+    if (!existing.results[0]) return false;
+    hubspotDealId = existing.results[0].id;
+    await saveDeal(hubspotDealId);
+    return true;
+  };
+
+  /*
+   * When the lead reached its outcome in the app, not when this sync ran — so
+   * a retry hours later still records the real close date.
+   */
+  const closeDate = async (): Promise<string> => lead.outcomeAt ?? new Date().toISOString();
+
+  if (hubspotLeadId) {
+    if (!hubspotDealId) await adoptDeal();
+
+    if (!hubspotDealId) {
+      /*
+       * A no-op save before creating anything: proves the lease is live AND
+       * that migration 0010 is applied, so a missing schema fails here rather
+       * than after a Deal exists in HubSpot that could not be recorded.
+       */
+      await saveDeal(null);
+      await guard();
+      try {
+        const created = await hubspotRequest<Created>(
+          "POST",
+          "/crm/v3/objects/deals",
+          {
+            properties: {
+              dealname: lead.hotelName,
+              pipeline: DEAL_PIPELINE_ID,
+              dealstage: outcome ? DEAL_STAGE_FOR_OUTCOME[outcome] : DEAL_START_STAGE,
+              ...(outcome ? { closedate: await closeDate() } : {}),
+              [EXTERNAL_ID_PROPERTY]: lead.id,
+              ...(ownerId ? { hubspot_owner_id: ownerId } : {}),
+            },
+            associations: [
+              ...(contactId
+                ? [
+                    {
+                      to: { id: contactId },
+                      types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: ASSOC.dealToContact }],
+                    },
+                  ]
+                : []),
+              ...(companyId
+                ? [
+                    {
+                      to: { id: companyId },
+                      types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: ASSOC.dealToPrimaryCompany }],
+                    },
+                  ]
+                : []),
+            ],
+          },
+          { idempotent: false },
+        );
+        hubspotDealId = created.id;
+        dealCreated = true;
+        // Saved at once, with the outcome it was created at.
+        await saveDeal(hubspotDealId, { value: outcome });
+      } catch (error) {
+        const duplicate = error instanceof HubSpotError && (error.status === 409 || error.status === 400);
+        if (duplicate && (await adoptDeal())) {
+          // It existed after all; the update below brings it in line.
+        } else if (duplicate) {
+          throw new HubSpotError("hubspot:validation", error.status, true, false);
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (hubspotDealId && !dealCreated) {
+      // Owner always follows the app. The stage only on a change of outcome.
+      const properties: Record<string, string> = { hubspot_owner_id: ownerId ?? "" };
+      let recorded: { value: "won" | "lost" | null } | undefined;
+      if (outcome && outcome !== lead.hubspotDealOutcome) {
+        properties.dealstage = DEAL_STAGE_FOR_OUTCOME[outcome];
+        properties.closedate = await closeDate();
+        recorded = { value: outcome };
+      } else if (!outcome && lead.hubspotDealOutcome) {
+        // Reopened in the app: the Deal is left as sales see it; only forget
+        // the outcome, so winning again closes it again.
+        recorded = { value: null };
+      }
+      await guard();
+      await hubspotRequest(
+        "PATCH",
+        `/crm/v3/objects/deals/${encodeURIComponent(hubspotDealId)}`,
+        { properties },
+        { idempotent: true },
+      );
+      if (recorded) await saveDeal(null, recorded);
+    }
+
+    if (hubspotDealId) {
+      /*
+       * Lead → Deal (primary), Deal → contact, Deal → company. Idempotent, so
+       * repeating them is harmless, and an adopted Deal or an interrupted
+       * earlier sync ends up fully linked.
+       */
+      const links: [string, string, number][] = [
+        [`leads/${encodeURIComponent(hubspotLeadId)}`, `deals/${encodeURIComponent(hubspotDealId)}`, ASSOC.leadToPrimaryDeal],
+        ...(contactId
+          ? [[`deals/${encodeURIComponent(hubspotDealId)}`, `contacts/${encodeURIComponent(contactId)}`, ASSOC.dealToContact] as [string, string, number]]
+          : []),
+        ...(companyId
+          ? [[`deals/${encodeURIComponent(hubspotDealId)}`, `companies/${encodeURIComponent(companyId)}`, ASSOC.dealToPrimaryCompany] as [string, string, number]]
+          : []),
+      ];
+      for (const [from, to, type] of links) {
+        await guard();
+        await hubspotRequest("PUT", `/crm/v3/objects/${from}/associations/${to}/${type}`, undefined, { idempotent: true });
+      }
+    }
+  }
+
+  // 6. The note, once — on the Lead and the Deal.
+  let noteId = await store.hubspotNoteId(lead.id);
+  if (hubspotLeadId && !noteId) {
     const existingNote = await findOwnNote(hubspotLeadId, lead.id);
     if (existingNote) {
-      await saveIds({ noteId: existingNote });
+      noteId = existingNote;
+      await saveIds({ noteId });
     } else {
       await guard();
       const note = await hubspotRequest<Created>(
@@ -417,12 +579,31 @@ export async function syncLead(claim: HubSpotClaim): Promise<SyncOutcome> {
               to: { id: hubspotLeadId },
               types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: ASSOC.noteToLead }],
             },
+            ...(hubspotDealId
+              ? [
+                  {
+                    to: { id: hubspotDealId },
+                    types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: ASSOC.noteToDeal }],
+                  },
+                ]
+              : []),
           ],
         },
         { idempotent: false },
       );
-      await saveIds({ noteId: note.id });
+      noteId = note.id;
+      await saveIds({ noteId });
     }
+  }
+  if (noteId && hubspotDealId) {
+    // Notes written before Deals existed get linked too. Idempotent.
+    await guard();
+    await hubspotRequest(
+      "PUT",
+      `/crm/v3/objects/notes/${encodeURIComponent(noteId)}/associations/deals/${encodeURIComponent(hubspotDealId)}/${ASSOC.noteToDeal}`,
+      undefined,
+      { idempotent: true },
+    );
   }
 
   return { warning };

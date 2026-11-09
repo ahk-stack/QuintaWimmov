@@ -45,8 +45,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface RequestOptions {
   /**
-   * Safe to repeat automatically: reads, searches, and PATCHes that set
-   * absolute values. Creates are NOT — a retried create can duplicate, so the
+   * Safe to repeat automatically: reads, searches, PATCHes that set absolute
+   * values, and association PUTs (which converge on the same link). Creates are NOT — a retried create can duplicate, so the
    * caller searches first instead.
    */
   idempotent: boolean;
@@ -54,7 +54,7 @@ export interface RequestOptions {
 
 /** Returns the parsed JSON body (or null for 204). Throws HubSpotError. */
 export async function hubspotRequest<T>(
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "PUT",
   path: string,
   body: unknown,
   options: RequestOptions,

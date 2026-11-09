@@ -107,10 +107,13 @@ app, under a checked session.
   same statement as the lead change; code that "remembers to enqueue" instead
   is a finding. `after()` only wakes the worker — it is never the only delivery.
 - Only the lease holder records results (`hubspot_save_ids/complete/fail`).
-- Creates are never retried blind. A HubSpot Lead is found by
+- Creates are never retried blind. A HubSpot Lead or Deal is found by
   `quinta_lead_hub_id` before any create; companies are matched by website
   domain only (never by name); existing contacts and companies are never
   modified, and an existing contact's primary company is never changed.
+- The Deal's stage is written only when the app's outcome (won/lost) changes,
+  tracked in `hubspot_deal_outcome`; writing it on every sync would overwrite
+  stages sales set in HubSpot. Associations use idempotent PUTs.
 - Errors are stored, logged and shown as fixed `HubSpotErrorCode`s. Logging or
   storing a HubSpot response body, a search URL, or any contact field is a
   finding.

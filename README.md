@@ -15,7 +15,7 @@ runs on Quinta's own monochrome brand rather than Wimmov's blue.
 | **Chat** | Channels that update themselves, direct messages, @mentions, and a discussion thread on every lead. |
 | **News** | Quinta announcements feed. |
 | **Accounts** | Username and password sign-in. Only admins create users, set or reset sign-ins, and delete users. |
-| **HubSpot** | Every new lead becomes a HubSpot **Lead** (with its contact, company and a note), starting as Sales Qualified Lead; owner and status changes follow it. One-way, app → HubSpot. |
+| **HubSpot** | Every new lead becomes a HubSpot **Lead** (Sales Qualified Lead) **and a Deal** in "Pipeline des ventes" (Target), with its contact, company and a note. Owner changes follow both; won/lost close the Deal (Contract signed / lost). One-way, app → HubSpot. |
 
 ## Stack
 

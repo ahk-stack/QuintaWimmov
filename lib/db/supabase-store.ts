@@ -68,6 +68,9 @@ interface LeadRow {
   hubspot_contact_id: string | null;
   hubspot_company_id: string | null;
   hubspot_lead_id: string | null;
+  hubspot_deal_id: string | null;
+  hubspot_deal_outcome: Lead["hubspotDealOutcome"];
+  outcome_at: string | null;
   hubspot_synced_at: string | null;
   hubspot_sync_state: Lead["hubspotSyncState"];
   hubspot_sync_error: Lead["hubspotSyncError"];
@@ -174,6 +177,9 @@ const toLead = (r: LeadRow): Lead => ({
   hubspotContactId: r.hubspot_contact_id,
   hubspotCompanyId: r.hubspot_company_id,
   hubspotLeadId: r.hubspot_lead_id,
+  hubspotDealId: r.hubspot_deal_id,
+  hubspotDealOutcome: r.hubspot_deal_outcome ?? null,
+  outcomeAt: r.outcome_at ?? null,
   hubspotSyncedAt: r.hubspot_synced_at,
   hubspotSyncState: r.hubspot_sync_state,
   hubspotSyncError: r.hubspot_sync_error,
@@ -590,6 +596,23 @@ export const supabaseStore: DataStore = {
     });
     if (error) fail("hubspotSetCompany");
     return data === true;
+  },
+
+  async hubspotSaveDeal(leadId, leaseToken, dealId, outcome) {
+    const { data, error } = await client().rpc("hubspot_save_deal", {
+      p_lead: leadId,
+      p_lease: leaseToken,
+      p_deal_id: dealId,
+      p_set_outcome: outcome !== undefined,
+      p_outcome: outcome?.value ?? null,
+    });
+    if (error) fail("hubspotSaveDeal");
+    return data === true;
+  },
+
+  async hubspotRequeue(leadId) {
+    const { error } = await client().rpc("hubspot_requeue", { p_lead: leadId });
+    if (error) fail("hubspotRequeue");
   },
 
   async hubspotNoteId(leadId) {

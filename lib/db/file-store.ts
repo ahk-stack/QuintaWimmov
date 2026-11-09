@@ -188,6 +188,9 @@ function normalise(parsed: Partial<Database>): Database {
     leads: asList<Lead>(parsed.leads).map((lead) => ({
       ...lead,
       hubspotLeadId: lead.hubspotLeadId ?? null,
+      hubspotDealId: lead.hubspotDealId ?? null,
+      hubspotDealOutcome: lead.hubspotDealOutcome ?? null,
+      outcomeAt: lead.outcomeAt ?? null,
       hubspotSyncState: lead.hubspotSyncState ?? "manual",
       hubspotSyncError: lead.hubspotSyncError ?? null,
     })),
@@ -372,6 +375,9 @@ export const fileStore: DataStore = {
         hubspotContactId: null,
         hubspotCompanyId: null,
         hubspotLeadId: null,
+        hubspotDealId: null,
+        hubspotDealOutcome: null,
+        outcomeAt: null,
         hubspotSyncedAt: null,
         // Same rule as the trigger in migration 0009.
         hubspotSyncState: input.contactEmail ? "pending" : "blocked",
@@ -439,6 +445,8 @@ export const fileStore: DataStore = {
           createdAt: now,
         });
         lead.status = patch.status;
+        // As the trigger in migration 0010.
+        if (patch.status === "won" || patch.status === "lost") lead.outcomeAt = now;
       }
 
       if (patch.assignedTo !== undefined && patch.assignedTo !== lead.assignedTo) {
@@ -622,6 +630,39 @@ export const fileStore: DataStore = {
       row.companyId = companyId;
       row.claimToken = null;
       return true;
+    });
+  },
+
+  async hubspotSaveDeal(leadId, leaseToken, dealId, outcome) {
+    return mutate((d) => {
+      const lead = d.leads.find((l) => l.id === leadId);
+      const job = jobFor(d, leadId);
+      if (!lead || job.leaseToken !== leaseToken || !job.leaseUntil || Date.parse(job.leaseUntil) <= Date.now()) {
+        return false;
+      }
+      if (dealId) {
+        // Unique, as the index in migration 0010; and never a second id.
+        if (d.leads.some((l) => l.id !== leadId && l.hubspotDealId === dealId)) throw new Error("duplicate deal id");
+        if (lead.hubspotDealId && lead.hubspotDealId !== dealId) throw new Error("deal conflict");
+        lead.hubspotDealId = lead.hubspotDealId ?? dealId;
+      }
+      if (outcome !== undefined) lead.hubspotDealOutcome = outcome.value;
+      return true;
+    });
+  },
+
+  async hubspotRequeue(leadId) {
+    await mutate((d) => {
+      const lead = d.leads.find((l) => l.id === leadId);
+      if (!lead || lead.hubspotSyncState === "manual" || lead.hubspotSyncState === "blocked") return;
+      const job = jobFor(d, leadId);
+      job.desiredRev += 1;
+      lead.hubspotDealOutcome = null;
+      if (["synced", "failed", "retry"].includes(lead.hubspotSyncState)) {
+        lead.hubspotSyncState = "pending";
+        job.attempts = 0;
+        job.nextAttemptAt = new Date().toISOString();
+      }
     });
   },
 

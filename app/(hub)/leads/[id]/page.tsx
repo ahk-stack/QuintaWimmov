@@ -16,7 +16,7 @@ import { DIRECTION_META, PRIORITY_META, STATUS_META } from "@/lib/status";
 import type { LeadEvent, Person } from "@/lib/types";
 import { HubSpotPanel } from "@/components/hubspot-panel";
 import { getSession, requireUser } from "@/lib/auth/session";
-import { hubspotEnabled, hubspotLeadUrl } from "@/lib/hubspot/config";
+import { hubspotDealUrl, hubspotEnabled, hubspotLeadUrl } from "@/lib/hubspot/config";
 
 export const dynamic = "force-dynamic";
 
@@ -252,6 +252,7 @@ export default async function LeadDetailPage({
               error={lead.hubspotSyncError}
               syncedAt={lead.hubspotSyncedAt}
               hubspotUrl={lead.hubspotLeadId ? hubspotLeadUrl(lead.hubspotLeadId) : null}
+              dealUrl={lead.hubspotDealId ? hubspotDealUrl(lead.hubspotDealId) : null}
               connected={hubspotEnabled()}
             />
           </Card>

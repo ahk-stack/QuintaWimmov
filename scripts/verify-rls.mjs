@@ -380,6 +380,10 @@ console.log("\n6d. THE SIGN-IN BOUNDARY: hashes, sessions and admin functions ar
     hubspot_claim_company: { p_domain: "probe.example", p_token: personId },
     hubspot_set_company: { p_domain: "probe.example", p_token: personId, p_company_id: "1" },
     hubspot_mark_company_uncertain: { p_domain: "probe.example", p_token: personId },
+    // 0010: Deals.
+    hubspot_save_deal: { p_lead: personId, p_lease: personId, p_deal_id: "1", p_set_outcome: false, p_outcome: null },
+    hubspot_queue_missing_deals: {},
+    hubspot_requeue: { p_lead: personId },
   };
   for (const [fn, args] of Object.entries(rpcCalls)) {
     const r = await post(`rpc/${fn}`, ANON, args);

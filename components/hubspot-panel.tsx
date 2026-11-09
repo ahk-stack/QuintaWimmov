@@ -38,6 +38,7 @@ export function HubSpotPanel({
   error,
   syncedAt,
   hubspotUrl,
+  dealUrl,
   connected,
 }: {
   leadId: string;
@@ -45,6 +46,7 @@ export function HubSpotPanel({
   error: HubSpotErrorCode | null;
   syncedAt: string | null;
   hubspotUrl: string | null;
+  dealUrl: string | null;
   connected: boolean;
 }) {
   const router = useRouter();
@@ -108,15 +110,19 @@ export function HubSpotPanel({
         <p className="mt-1 text-xs text-muted">Posted before the HubSpot sync started.</p>
       ) : null}
 
-      {hubspotUrl ? (
-        <a
-          href={hubspotUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 inline-block text-xs font-bold underline underline-offset-2"
-        >
-          Open in HubSpot
-        </a>
+      {hubspotUrl || dealUrl ? (
+        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold">
+          {hubspotUrl ? (
+            <a href={hubspotUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              Open lead in HubSpot
+            </a>
+          ) : null}
+          {dealUrl ? (
+            <a href={dealUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              Open deal in HubSpot
+            </a>
+          ) : null}
+        </p>
       ) : null}
 
       {canSend ? (

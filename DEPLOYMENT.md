@@ -147,9 +147,15 @@ string. They are plain SQL, in `supabase/migrations/`:
 0007_auth.sql                        sign-in tables + admin functions (additive)
 0008_lockdown.sql                    drops the last anon policies — see below
 0009_hubspot_sync.sql                HubSpot sync state on leads + queue functions (additive)
+0010_hubspot_deals.sql               HubSpot Deal id/outcome + functions (additive)
 ```
 
-A fresh environment needs all nine, in order. **0008 must only be applied once
+A fresh environment needs all ten, in order. After the Deal-aware code is live
+on every deployment, queue leads that were synced before Deals existed, once:
+
+```sql
+select public.hubspot_queue_missing_deals();
+``` **0008 must only be applied once
 every running copy of the app has the sign-in release**: older copies read chat
 through the publishable key, and 0008 is what stops that.
 
@@ -246,8 +252,11 @@ support is needed anywhere, so a plain HTTP reverse proxy is fine.
 ## 7b. HubSpot sync
 
 Every new lead is created in HubSpot as a **Lead** (pipeline "Lead pipeline",
-stage Sales Qualified Lead) with its contact (matched by email), its company
-(matched by website domain) and a note; owner and status changes follow. The
+stage Sales Qualified Lead) **and a Deal** (pipeline "Pipeline des ventes",
+stage Target), with its contact (matched by email), its company (matched by
+website domain) and a note. Owner changes follow both — the app is the
+authority for ownership. The Deal's stage changes only on the app's outcome:
+won → Contract signed, lost → Contract lost; the stages in between are sales'. The
 queue lives in Postgres (migration 0009), so nothing is lost if a pod dies
 mid-sync: a lease expires and another worker picks the lead up.
 
