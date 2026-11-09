@@ -4,20 +4,50 @@
     {
       "name": "lead-hub",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 65050,
       "autoPort": true
     },
     {
       "name": "lead-hub-devstore",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "65061"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "65061"
+      ],
       "port": 65061,
       "env": {
         "SUPABASE_URL": "",
         "NEXT_PUBLIC_SUPABASE_URL": "",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY": "",
         "SUPABASE_SERVICE_ROLE_KEY": ""
+      }
+    },
+    {
+      "name": "lead-hub-hubspot-mock",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "65062"
+      ],
+      "port": 65062,
+      "env": {
+        "SUPABASE_URL": "",
+        "NEXT_PUBLIC_SUPABASE_URL": "",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY": "",
+        "SUPABASE_SERVICE_ROLE_KEY": "",
+        "HUBSPOT_TOKEN": "mock-token-0123456789abcdef",
+        "HUBSPOT_API_BASE": "http://localhost:65099",
+        "CRON_SECRET": "local-cron-secret-0123456789abcdef0123"
       }
     }
   ]

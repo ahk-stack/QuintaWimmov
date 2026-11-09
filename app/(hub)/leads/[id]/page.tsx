@@ -13,9 +13,10 @@ import {
 import { getStore, storeKind } from "@/lib/db";
 import { displayHost, formatDate, formatDateTime } from "@/lib/format";
 import { DIRECTION_META, PRIORITY_META, STATUS_META } from "@/lib/status";
-import { hubspotSyncState } from "@/lib/types";
-import type { Lead, LeadEvent, Person } from "@/lib/types";
+import type { LeadEvent, Person } from "@/lib/types";
+import { HubSpotPanel } from "@/components/hubspot-panel";
 import { getSession, requireUser } from "@/lib/auth/session";
+import { hubspotEnabled, hubspotLeadUrl } from "@/lib/hubspot/config";
 
 export const dynamic = "force-dynamic";
 
@@ -81,49 +82,6 @@ function describeEvent(event: LeadEvent, peopleById: Map<string, Person>): strin
     default:
       return `${actor} made a change`;
   }
-}
-
-function HubSpotPanel({ lead }: { lead: Lead }) {
-  const state = hubspotSyncState(lead);
-
-  const label = {
-    idle: "Not pushed yet",
-    synced: "Synced",
-    failed: "Failed",
-  }[state];
-
-  const tone = {
-    idle: "text-status-pending",
-    synced: "text-status-won",
-    failed: "text-status-lost",
-  }[state];
-
-  return (
-    <div>
-      <h2 className="text-xs font-bold tracking-[0.16em] uppercase">HubSpot</h2>
-      <p className={`mt-3 text-sm font-bold ${tone}`}>{label}</p>
-      {lead.hubspotSyncedAt ? (
-        <p className="mt-1 text-xs text-muted">
-          {formatDateTime(lead.hubspotSyncedAt)}
-        </p>
-      ) : null}
-      {/*
-        Never render hubspotSyncError verbatim. HubSpot rejection messages quote
-        the offending request, which for these calls means the prospect's email
-        or phone — and this page is reachable by anyone with the URL. The detail
-        stays server-side; the page says only that it failed.
-      */}
-      {lead.hubspotSyncError ? (
-        <p className="mt-1 text-xs text-status-lost">
-          The last push was rejected. An admin can find the reason in the server
-          logs.
-        </p>
-      ) : null}
-      <p className="mt-2 text-xs text-muted">
-        Pushing accepted leads to HubSpot arrives in Phase 5.
-      </p>
-    </div>
-  );
 }
 
 export default async function LeadDetailPage({
@@ -288,7 +246,14 @@ export default async function LeadDetailPage({
           </Card>
 
           <Card>
-            <HubSpotPanel lead={lead} />
+            <HubSpotPanel
+              leadId={lead.id}
+              state={lead.hubspotSyncState}
+              error={lead.hubspotSyncError}
+              syncedAt={lead.hubspotSyncedAt}
+              hubspotUrl={lead.hubspotLeadId ? hubspotLeadUrl(lead.hubspotLeadId) : null}
+              connected={hubspotEnabled()}
+            />
           </Card>
 
           <section>

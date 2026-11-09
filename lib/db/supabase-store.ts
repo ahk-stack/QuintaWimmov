@@ -17,7 +17,6 @@ import type {
 import {
   SlugTakenError,
   type DataStore,
-  type HubSpotResult,
   type LeadFilter,
   type LeadPatch,
   type NewLead,
@@ -68,9 +67,10 @@ interface LeadRow {
   assigned_to: string | null;
   hubspot_contact_id: string | null;
   hubspot_company_id: string | null;
-  hubspot_deal_id: string | null;
+  hubspot_lead_id: string | null;
   hubspot_synced_at: string | null;
-  hubspot_sync_error: string | null;
+  hubspot_sync_state: Lead["hubspotSyncState"];
+  hubspot_sync_error: Lead["hubspotSyncError"];
 }
 
 interface LeadEventRow {
@@ -173,8 +173,9 @@ const toLead = (r: LeadRow): Lead => ({
   assignedTo: r.assigned_to,
   hubspotContactId: r.hubspot_contact_id,
   hubspotCompanyId: r.hubspot_company_id,
-  hubspotDealId: r.hubspot_deal_id,
+  hubspotLeadId: r.hubspot_lead_id,
   hubspotSyncedAt: r.hubspot_synced_at,
+  hubspotSyncState: r.hubspot_sync_state,
   hubspotSyncError: r.hubspot_sync_error,
 });
 
@@ -492,34 +493,114 @@ export const supabaseStore: DataStore = {
     return toLead(data as LeadRow);
   },
 
-  async recordHubSpotResult(id, result: HubSpotResult) {
-    const changes: Record<string, unknown> = result.error
-      ? { hubspot_sync_error: result.error }
-      : {
-          hubspot_contact_id: result.contactId ?? null,
-          hubspot_company_id: result.companyId ?? null,
-          hubspot_deal_id: result.dealId ?? null,
-          hubspot_synced_at: new Date().toISOString(),
-          hubspot_sync_error: null,
-        };
+  /*
+   * HubSpot queue. The state machine lives in Postgres (migration 0009); these
+   * are thin calls so the rules stay in one transactional place.
+   */
+  async hubspotClaim(limit, leaseSeconds) {
+    const { data, error } = await client().rpc("hubspot_claim", {
+      p_limit: limit,
+      p_lease_seconds: leaseSeconds,
+    });
+    if (error) fail("hubspotClaim");
+    return (data as { lead_id: string; lease_token: string; revision: number }[]).map((r) => ({
+      leadId: r.lead_id,
+      leaseToken: r.lease_token,
+      revision: r.revision,
+    }));
+  },
 
+  async hubspotRequest(leadId) {
+    if (!isUuid(leadId)) return false;
+    const { data, error } = await client().rpc("hubspot_request", { p_lead: leadId });
+    if (error) fail("hubspotRequest");
+    return data === true;
+  },
+
+  async hubspotSaveIds(leadId, leaseToken, ids) {
+    const { data, error } = await client().rpc("hubspot_save_ids", {
+      p_lead: leadId,
+      p_lease: leaseToken,
+      p_contact_id: ids.contactId ?? null,
+      p_company_id: ids.companyId ?? null,
+      p_lead_id: ids.leadId ?? null,
+      p_note_id: ids.noteId ?? null,
+    });
+    if (error) fail("hubspotSaveIds");
+    return data === true;
+  },
+
+  async hubspotComplete(leadId, leaseToken, revision, warning) {
+    const { data, error } = await client().rpc("hubspot_complete", {
+      p_lead: leadId,
+      p_lease: leaseToken,
+      p_revision: revision,
+      p_warning: warning,
+    });
+    if (error) fail("hubspotComplete");
+    return data === true;
+  },
+
+  async hubspotFail(leadId, leaseToken, code, options) {
+    const { data, error } = await client().rpc("hubspot_fail", {
+      p_lead: leadId,
+      p_lease: leaseToken,
+      p_code: code,
+      p_retryable: options.retryable,
+      p_blocked: options.blocked,
+    });
+    if (error) fail("hubspotFail");
+    return data === true;
+  },
+
+  async hubspotRenew(leadId, leaseToken, seconds) {
+    const { data, error } = await client().rpc("hubspot_renew", {
+      p_lead: leadId,
+      p_lease: leaseToken,
+      p_seconds: seconds,
+    });
+    if (error) fail("hubspotRenew");
+    return data === true;
+  },
+
+  async hubspotClaimCompany(domain, token) {
+    const { data, error } = await client().rpc("hubspot_claim_company", {
+      p_domain: domain,
+      p_token: token,
+    });
+    if (error) fail("hubspotClaimCompany");
+    const row = (data as { company_id: string | null; mine: boolean; uncertain: boolean }[])[0];
+    return { companyId: row?.company_id ?? null, mine: row?.mine === true, uncertain: row?.uncertain === true };
+  },
+
+  async hubspotMarkCompanyUncertain(domain, token) {
+    const { data, error } = await client().rpc("hubspot_mark_company_uncertain", {
+      p_domain: domain,
+      p_token: token,
+    });
+    if (error) fail("hubspotMarkCompanyUncertain");
+    return data === true;
+  },
+
+  async hubspotSetCompany(domain, token, companyId) {
+    const { data, error } = await client().rpc("hubspot_set_company", {
+      p_domain: domain,
+      p_token: token,
+      p_company_id: companyId,
+    });
+    if (error) fail("hubspotSetCompany");
+    return data === true;
+  },
+
+  async hubspotNoteId(leadId) {
+    if (!isUuid(leadId)) return null;
     const { data, error } = await client()
       .from("leads")
-      .update(changes)
-      .eq("id", id)
-      .select("*")
-      .single();
-    if (error) fail("recordHubSpotResult");
-
-    if (!result.error) {
-      await client().from("lead_events").insert({
-        lead_id: id,
-        actor_id: null,
-        type: "hubspot_synced",
-      });
-    }
-
-    return toLead(data as LeadRow);
+      .select("hubspot_note_id")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (error) fail("hubspotNoteId");
+    return (data as { hubspot_note_id: string | null } | null)?.hubspot_note_id ?? null;
   },
 
   async listLeadEvents(leadId) {

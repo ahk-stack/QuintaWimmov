@@ -130,7 +130,8 @@ function tooMany(retryAfterSeconds: number): Response {
     { error: "Too many requests. Wait a moment and try again." },
     {
       status: 429,
-      headers: { "Retry-After": String(retryAfterSeconds) },
+      // Per caller, so never cacheable — like every authenticated response.
+      headers: { "Retry-After": String(retryAfterSeconds), "Cache-Control": "private, no-store" },
     },
   );
 }

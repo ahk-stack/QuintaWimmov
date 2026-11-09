@@ -326,7 +326,7 @@ console.log("\n6d. THE SIGN-IN BOUNDARY: hashes, sessions and admin functions ar
     check("session planted with service_role", Boolean(sessionId), `HTTP ${sess.status}`);
   }
 
-  for (const t of ["person_credentials", "sessions", "login_throttle", "admin_audit"]) {
+  for (const t of ["person_credentials", "sessions", "login_throttle", "admin_audit", "hubspot_companies"]) {
     const { status, body } = await get(`${t}?select=*`, ANON);
     const rows = Array.isArray(body) ? body.length : -1;
     const text = JSON.stringify(body ?? "");
@@ -370,6 +370,16 @@ console.log("\n6d. THE SIGN-IN BOUNDARY: hashes, sessions and admin functions ar
     bootstrap_set_credentials: { p_person: personId, p_username: "anon.boot", p_password_hash: HASH_CANARY, p_force: true },
     auth_throttle_clear: { p_keys: ["ip:" + "0".repeat(64)] },
     auth_throttle_hit: { p_keys: ["ip:" + "0".repeat(64)], p_window_seconds: 60 },
+    // 0009: the HubSpot queue.
+    hubspot_claim: { p_limit: 1, p_lease_seconds: 60 },
+    hubspot_request: { p_lead: personId },
+    hubspot_save_ids: { p_lead: personId, p_lease: personId, p_contact_id: "x", p_company_id: null, p_lead_id: null, p_note_id: null },
+    hubspot_complete: { p_lead: personId, p_lease: personId, p_revision: 1, p_warning: null },
+    hubspot_fail: { p_lead: personId, p_lease: personId, p_code: "internal", p_retryable: false, p_blocked: false },
+    hubspot_renew: { p_lead: personId, p_lease: personId, p_seconds: 60 },
+    hubspot_claim_company: { p_domain: "probe.example", p_token: personId },
+    hubspot_set_company: { p_domain: "probe.example", p_token: personId, p_company_id: "1" },
+    hubspot_mark_company_uncertain: { p_domain: "probe.example", p_token: personId },
   };
   for (const [fn, args] of Object.entries(rpcCalls)) {
     const r = await post(`rpc/${fn}`, ANON, args);

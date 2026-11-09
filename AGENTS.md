@@ -31,7 +31,10 @@ app, under a checked session.
 ### Authentication and authorisation
 - Every route handler starts with `authorize(request, …)` from `lib/auth/guard.ts`
   (login and logout use `isSameOriginRequest` directly). A handler that reads or
-  writes the store without it is a finding.
+  writes the store without it is a finding. The one exception is
+  `app/api/cron/*`, called by a scheduler with no session: those authenticate a
+  `Bearer CRON_SECRET` header with a constant-time comparison, refuse when the
+  secret is unset or short, and may only drain existing queues.
 - Every page under `app/(hub)` calls `requireUser()` itself. The layout's check
   and `proxy.ts` are conveniences — a layout does not stop its pages rendering —
   so relying on either is a finding.
@@ -98,6 +101,19 @@ app, under a checked session.
   (`lib/auth/login.ts`), not only in memory, so the limit holds across instances.
 - HubSpot writes must search for an existing contact by email before creating
   one. A create-blind write duplicates CRM records.
+
+### HubSpot sync (`lib/hubspot/`, migration 0009)
+- One-way, app → HubSpot. The queue state is set by the database trigger in the
+  same statement as the lead change; code that "remembers to enqueue" instead
+  is a finding. `after()` only wakes the worker — it is never the only delivery.
+- Only the lease holder records results (`hubspot_save_ids/complete/fail`).
+- Creates are never retried blind. A HubSpot Lead is found by
+  `quinta_lead_hub_id` before any create; companies are matched by website
+  domain only (never by name); existing contacts and companies are never
+  modified, and an existing contact's primary company is never changed.
+- Errors are stored, logged and shown as fixed `HubSpotErrorCode`s. Logging or
+  storing a HubSpot response body, a search URL, or any contact field is a
+  finding.
 
 ### Brand rules are enforceable in code review
 - Only these colours may appear: `#000000`, `#FFFFFF`, the neutral interface

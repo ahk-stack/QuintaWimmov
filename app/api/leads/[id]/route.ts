@@ -1,5 +1,6 @@
 import { authorize } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
+import { wakeHubSpot } from "@/lib/hubspot/worker";
 import { enforcePersonRateLimit } from "@/lib/rate-limit";
 import { fieldErrors, leadPatchSchema } from "@/lib/validation";
 
@@ -74,6 +75,9 @@ export async function PATCH(
         },
       ]);
     }
+
+    // Owner or status changes were queued for HubSpot by the database.
+    wakeHubSpot();
 
     return Response.json({
       status: lead.status,

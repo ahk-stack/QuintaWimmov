@@ -311,10 +311,12 @@ export function LeadForm({ people }: { people: Person[] }) {
               className={INPUT_CLASS}
             />
           </Field>
-          <Field label="Contact email" error={fieldError.contactEmail}>
+          <Field label="Contact email" error={fieldError.contactEmail} required hint="Needed to create the lead in HubSpot.">
             <input
               name="contactEmail"
               type="email"
+              required
+              aria-required="true"
               maxLength={200}
               autoComplete="off"
               className={INPUT_CLASS}

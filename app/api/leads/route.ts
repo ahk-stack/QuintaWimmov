@@ -1,5 +1,6 @@
 import { authorize } from "@/lib/auth/guard";
 import { getStore } from "@/lib/db";
+import { wakeHubSpot } from "@/lib/hubspot/worker";
 import { enforcePersonRateLimit } from "@/lib/rate-limit";
 import { fieldErrors, newLeadSchema } from "@/lib/validation";
 
@@ -65,6 +66,10 @@ export async function POST(request: Request) {
         },
       ]);
     }
+
+    // The database queued it for HubSpot with the insert; this just starts the
+    // worker once the response is out.
+    wakeHubSpot();
 
     return Response.json({ id: lead.id }, { status: 201 });
   } catch {

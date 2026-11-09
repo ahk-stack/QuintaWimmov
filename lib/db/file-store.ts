@@ -27,7 +27,6 @@ import {
 import {
   SlugTakenError,
   type DataStore,
-  type HubSpotResult,
   type LeadFilter,
   type LeadPatch,
   type NewLead,
@@ -81,6 +80,26 @@ export interface AuditRow {
   createdAt: string;
 }
 
+/** HubSpot queue bookkeeping the Lead type does not carry (migration 0009). */
+export interface HubSpotJobRow {
+  leadId: string;
+  desiredRev: number;
+  syncedRev: number;
+  attempts: number;
+  nextAttemptAt: string | null;
+  leaseToken: string | null;
+  leaseUntil: string | null;
+  noteId: string | null;
+}
+
+export interface CompanyClaimRow {
+  domain: string;
+  companyId: string | null;
+  claimToken: string | null;
+  claimedAt: string;
+  uncertain?: boolean;
+}
+
 export interface Database {
   people: Person[];
   leads: Lead[];
@@ -95,6 +114,8 @@ export interface Database {
   sessions: SessionRow[];
   loginThrottle: ThrottleRow[];
   adminAudit: AuditRow[];
+  hubspotJobs: HubSpotJobRow[];
+  hubspotCompanies: CompanyClaimRow[];
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -118,6 +139,8 @@ function seedDatabase(): Database {
     sessions: [],
     loginThrottle: [],
     adminAudit: [],
+    hubspotJobs: [],
+    hubspotCompanies: [],
   };
 }
 
@@ -162,7 +185,12 @@ function normalise(parsed: Partial<Database>): Database {
 
   return {
     people: asList<Person>(parsed.people),
-    leads: asList<Lead>(parsed.leads),
+    leads: asList<Lead>(parsed.leads).map((lead) => ({
+      ...lead,
+      hubspotLeadId: lead.hubspotLeadId ?? null,
+      hubspotSyncState: lead.hubspotSyncState ?? "manual",
+      hubspotSyncError: lead.hubspotSyncError ?? null,
+    })),
     leadEvents: asList<LeadEvent>(parsed.leadEvents),
     leadComments: asList<LeadComment>(parsed.leadComments),
     channels: asList<Channel>(parsed.channels),
@@ -174,6 +202,8 @@ function normalise(parsed: Partial<Database>): Database {
     sessions: asList<SessionRow>(parsed.sessions),
     loginThrottle: asList<ThrottleRow>(parsed.loginThrottle),
     adminAudit: asList<AuditRow>(parsed.adminAudit),
+    hubspotJobs: asList<HubSpotJobRow>(parsed.hubspotJobs),
+    hubspotCompanies: asList<CompanyClaimRow>(parsed.hubspotCompanies),
   };
 }
 
@@ -264,6 +294,25 @@ export async function read<T>(fn: (data: Database) => T): Promise<T> {
   return fn(await db());
 }
 
+/** The queue row for a lead, created on first use (older dev data has none). */
+function jobFor(d: Database, leadId: string): HubSpotJobRow {
+  let job = d.hubspotJobs.find((j) => j.leadId === leadId);
+  if (!job) {
+    job = {
+      leadId,
+      desiredRev: 0,
+      syncedRev: 0,
+      attempts: 0,
+      nextAttemptAt: null,
+      leaseToken: null,
+      leaseUntil: null,
+      noteId: null,
+    };
+    d.hubspotJobs.push(job);
+  }
+  return job;
+}
+
 const newest = (a: { createdAt: string }, b: { createdAt: string }) =>
   b.createdAt.localeCompare(a.createdAt);
 const oldest = (a: { createdAt: string }, b: { createdAt: string }) =>
@@ -322,11 +371,23 @@ export const fileStore: DataStore = {
         assignedTo: input.assignedTo ?? null,
         hubspotContactId: null,
         hubspotCompanyId: null,
-        hubspotDealId: null,
+        hubspotLeadId: null,
         hubspotSyncedAt: null,
-        hubspotSyncError: null,
+        // Same rule as the trigger in migration 0009.
+        hubspotSyncState: input.contactEmail ? "pending" : "blocked",
+        hubspotSyncError: input.contactEmail ? null : "no_contact",
       };
       d.leads.push(lead);
+      d.hubspotJobs.push({
+        leadId: lead.id,
+        desiredRev: 1,
+        syncedRev: 0,
+        attempts: 0,
+        nextAttemptAt: now,
+        leaseToken: null,
+        leaseUntil: null,
+        noteId: null,
+      });
       d.leadEvents.push({
         id: randomUUID(),
         leadId: lead.id,
@@ -364,6 +425,7 @@ export const fileStore: DataStore = {
       const lead = d.leads.find((l) => l.id === id);
       if (!lead) throw new Error(`Lead ${id} not found`);
       const now = new Date().toISOString();
+      const before = { status: lead.status, assignedTo: lead.assignedTo };
 
       if (patch.status && patch.status !== lead.status) {
         d.leadEvents.push({
@@ -395,27 +457,97 @@ export const fileStore: DataStore = {
 
       if (patch.priority) lead.priority = patch.priority;
 
+      // Same rule as the trigger in migration 0009: owner or status changed.
+      if (
+        (patch.status && patch.status !== before.status) ||
+        (patch.assignedTo !== undefined && patch.assignedTo !== before.assignedTo)
+      ) {
+        const job = jobFor(d, id);
+        job.desiredRev += 1;
+        if (lead.hubspotSyncState !== "manual" && lead.hubspotSyncState !== "blocked") {
+          if (lead.hubspotSyncState !== "running") {
+            lead.hubspotSyncState = "pending";
+            job.attempts = 0;
+            job.nextAttemptAt = now;
+          }
+        }
+      }
+
       return structuredClone(lead);
     });
   },
 
-  async recordHubSpotResult(id, result: HubSpotResult) {
+  async hubspotClaim(limit, leaseSeconds) {
     return mutate((d) => {
-      const lead = d.leads.find((l) => l.id === id);
-      if (!lead) throw new Error(`Lead ${id} not found`);
-      const now = new Date().toISOString();
+      const now = Date.now();
+      const due = d.leads.filter((lead) => {
+        const job = jobFor(d, lead.id);
+        if (lead.hubspotSyncState === "pending" || lead.hubspotSyncState === "retry") {
+          return !job.nextAttemptAt || Date.parse(job.nextAttemptAt) <= now;
+        }
+        return lead.hubspotSyncState === "running" && job.leaseUntil !== null && Date.parse(job.leaseUntil) < now;
+      });
+      // Same order as the SQL: earliest due first.
+      const dueAt = (leadId: string) => Date.parse(jobFor(d, leadId).nextAttemptAt ?? "1970-01-01");
+      due.sort((a, b) => dueAt(a.id) - dueAt(b.id));
+      return due.slice(0, Math.max(1, Math.min(limit, 20))).map((lead) => {
+        const job = jobFor(d, lead.id);
+        lead.hubspotSyncState = "running";
+        job.leaseToken = randomUUID();
+        job.leaseUntil = new Date(now + Math.max(30, Math.min(leaseSeconds, 900)) * 1000).toISOString();
+        return { leadId: lead.id, leaseToken: job.leaseToken, revision: job.desiredRev };
+      });
+    });
+  },
 
-      if (result.error) {
-        lead.hubspotSyncError = result.error;
-      } else {
-        lead.hubspotContactId = result.contactId ?? lead.hubspotContactId;
-        lead.hubspotCompanyId = result.companyId ?? lead.hubspotCompanyId;
-        lead.hubspotDealId = result.dealId ?? lead.hubspotDealId;
-        lead.hubspotSyncedAt = now;
-        lead.hubspotSyncError = null;
+  async hubspotRequest(leadId) {
+    return mutate((d) => {
+      const lead = d.leads.find((l) => l.id === leadId);
+      // Not scheduled retries: that would bypass the backoff (as in the SQL).
+      if (!lead || !["manual", "failed"].includes(lead.hubspotSyncState)) return false;
+      const job = jobFor(d, leadId);
+      lead.hubspotSyncState = "pending";
+      lead.hubspotSyncError = null;
+      job.attempts = 0;
+      job.nextAttemptAt = new Date().toISOString();
+      job.desiredRev = Math.max(job.desiredRev, 1);
+      return true;
+    });
+  },
+
+  async hubspotSaveIds(leadId, leaseToken, ids) {
+    return mutate((d) => {
+      const lead = d.leads.find((l) => l.id === leadId);
+      const job = jobFor(d, leadId);
+      if (!lead || job.leaseToken !== leaseToken || !job.leaseUntil || Date.parse(job.leaseUntil) <= Date.now()) return false;
+      lead.hubspotContactId = ids.contactId ?? lead.hubspotContactId;
+      lead.hubspotCompanyId = ids.companyId ?? lead.hubspotCompanyId;
+      lead.hubspotLeadId = ids.leadId ?? lead.hubspotLeadId;
+      job.noteId = ids.noteId ?? job.noteId;
+      return true;
+    });
+  },
+
+  async hubspotComplete(leadId, leaseToken, revision, warning) {
+    return mutate((d) => {
+      const lead = d.leads.find((l) => l.id === leadId);
+      const job = jobFor(d, leadId);
+      if (!lead || job.leaseToken !== leaseToken || !job.leaseUntil || Date.parse(job.leaseUntil) <= Date.now()) return false;
+      const first = lead.hubspotSyncedAt === null;
+      const now = new Date().toISOString();
+      job.syncedRev = Math.max(job.syncedRev, revision);
+      job.attempts = 0;
+      job.leaseToken = null;
+      job.leaseUntil = null;
+      lead.hubspotSyncedAt = now;
+      lead.hubspotSyncError = warning;
+      const more = job.desiredRev > revision;
+      lead.hubspotSyncState = more ? "pending" : "synced";
+      job.nextAttemptAt = more ? now : null;
+      if (first) {
         d.leadEvents.push({
           id: randomUUID(),
-          leadId: id,
+          leadId,
           actorId: null,
           type: "hubspot_synced",
           fromStatus: null,
@@ -424,9 +556,77 @@ export const fileStore: DataStore = {
           createdAt: now,
         });
       }
-
-      return structuredClone(lead);
+      return true;
     });
+  },
+
+  async hubspotFail(leadId, leaseToken, code, options) {
+    return mutate((d) => {
+      const lead = d.leads.find((l) => l.id === leadId);
+      const job = jobFor(d, leadId);
+      if (!lead || job.leaseToken !== leaseToken || !job.leaseUntil || Date.parse(job.leaseUntil) <= Date.now()) return false;
+      job.attempts += 1;
+      job.leaseToken = null;
+      job.leaseUntil = null;
+      lead.hubspotSyncError = code;
+      const again = options.retryable && !options.blocked && job.attempts < 8;
+      lead.hubspotSyncState = options.blocked ? "blocked" : again ? "retry" : "failed";
+      job.nextAttemptAt = again
+        ? new Date(Date.now() + Math.min(6 * 60, 2 ** (job.attempts - 1)) * 60_000).toISOString()
+        : null;
+      return true;
+    });
+  },
+
+  async hubspotRenew(leadId, leaseToken, seconds) {
+    return mutate((d) => {
+      const job = jobFor(d, leadId);
+      if (job.leaseToken !== leaseToken || !job.leaseUntil || Date.parse(job.leaseUntil) <= Date.now()) return false;
+      job.leaseUntil = new Date(Date.now() + Math.max(30, Math.min(seconds, 900)) * 1000).toISOString();
+      return true;
+    });
+  },
+
+  async hubspotClaimCompany(domain, token) {
+    return mutate((d) => {
+      let row = d.hubspotCompanies.find((c) => c.domain === domain);
+      if (!row) {
+        row = { domain, companyId: null, claimToken: token, claimedAt: new Date().toISOString() };
+        d.hubspotCompanies.push(row);
+      }
+      const uncertain = row.uncertain === true;
+      if (row.companyId) return { companyId: row.companyId, mine: false, uncertain };
+      if (row.claimToken === token) return { companyId: null, mine: true, uncertain };
+      if (Date.parse(row.claimedAt) < Date.now() - 5 * 60_000) {
+        row.claimToken = token;
+        row.claimedAt = new Date().toISOString();
+        return { companyId: null, mine: true, uncertain };
+      }
+      return { companyId: null, mine: false, uncertain };
+    });
+  },
+
+  async hubspotMarkCompanyUncertain(domain, token) {
+    return mutate((d) => {
+      const row = d.hubspotCompanies.find((c) => c.domain === domain);
+      if (!row || row.claimToken !== token || row.companyId) return false;
+      row.uncertain = true;
+      return true;
+    });
+  },
+
+  async hubspotSetCompany(domain, token, companyId) {
+    return mutate((d) => {
+      const row = d.hubspotCompanies.find((c) => c.domain === domain);
+      if (!row || row.claimToken !== token || row.companyId) return false;
+      row.companyId = companyId;
+      row.claimToken = null;
+      return true;
+    });
+  },
+
+  async hubspotNoteId(leadId) {
+    return read((d) => d.hubspotJobs.find((j) => j.leadId === leadId)?.noteId ?? null);
   },
 
   async listLeadEvents(leadId) {

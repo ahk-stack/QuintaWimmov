@@ -108,8 +108,15 @@ because the app currently runs on Vercel, where it is unnecessary.
 are disabled. On Quinta's hosting the values live in Infisical (project
 `quinta-leads-hub`, env `preprod`).
 
-Phase 5 (HubSpot push, not yet built) will add `HUBSPOT_TOKEN`,
-`HUBSPOT_PIPELINE_ID` and `HUBSPOT_DEAL_STAGE_ID`, all server-only secrets.
+**HubSpot sync** adds two more, both server-only secrets in Infisical:
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `HUBSPOT_TOKEN` | for the sync | HubSpot private-app token. Unset = sync off; leads queue up and go once it is set. |
+| `CRON_SECRET` | for the sweep | ≥ 32 random characters. Authenticates the scheduled sweep (§ HubSpot below). Unset = the route refuses every call. |
+
+`HUBSPOT_API_BASE` exists for local testing against a mock and is ignored in
+production.
 
 > **Never set `ALLOW_DEV_STORE=true` in production.** It switches the app onto a
 > JSON file on local disk instead of the database. Every instance would get its
@@ -139,9 +146,10 @@ string. They are plain SQL, in `supabase/migrations/`:
 0006_lead_assigned_notification.sql  run on its own; see the file header
 0007_auth.sql                        sign-in tables + admin functions (additive)
 0008_lockdown.sql                    drops the last anon policies — see below
+0009_hubspot_sync.sql                HubSpot sync state on leads + queue functions (additive)
 ```
 
-A fresh environment needs all eight, in order. **0008 must only be applied once
+A fresh environment needs all nine, in order. **0008 must only be applied once
 every running copy of the app has the sign-in release**: older copies read chat
 through the publishable key, and 0008 is what stops that.
 
@@ -235,6 +243,31 @@ Users' browsers need **nothing** beyond the app's own hostname: chat polls the
 app every few seconds instead of opening a WebSocket to Supabase. No WebSocket
 support is needed anywhere, so a plain HTTP reverse proxy is fine.
 
+## 7b. HubSpot sync
+
+Every new lead is created in HubSpot as a **Lead** (pipeline "Lead pipeline",
+stage Sales Qualified Lead) with its contact (matched by email), its company
+(matched by website domain) and a note; owner and status changes follow. The
+queue lives in Postgres (migration 0009), so nothing is lost if a pod dies
+mid-sync: a lease expires and another worker picks the lead up.
+
+The worker runs right after each lead change and, throttled, during normal
+traffic. **Also schedule a sweep**, so retries happen even when nobody is using
+the app — a Kubernetes CronJob every 5 minutes:
+
+```bash
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://quinta-leadhub.quinta.im/api/cron/hubspot
+```
+
+(On Vercel, `vercel.json` schedules the same call daily, which is all the Hobby
+plan allows; traffic covers the rest.)
+
+Outbound: the app server needs HTTPS to `api.hubapi.com`.
+
+Before switching it on: `npm run hubspot:preflight` (read-only) checks the
+token, the Lead properties, the pipeline and stages, and which roster people
+are HubSpot owners.
+
 ## 8. Health checks
 
 ```
@@ -300,4 +333,4 @@ Expired rows are cleaned up on each sign-in; no scheduled job needed.
 - The three Supabase values, from a secret channel — not email or chat.
 - Confirmation of whether the service-role key has been rotated. It should be
   rotated before handover regardless.
-- The HubSpot credentials when Phase 5 lands.
+- The HubSpot private-app token and the cron secret, through Infisical.

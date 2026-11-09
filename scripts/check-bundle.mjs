@@ -67,12 +67,24 @@ if (key.length < 16) {
   process.exit(1);
 }
 
+/*
+ * The other server-only secrets are searched for too when set. They are
+ * optional (HubSpot may not be connected yet), so absence is not a failure —
+ * `npm run check` supplies sentinels for them as well.
+ */
+const secrets = [["SUPABASE_SERVICE_ROLE_KEY", key]];
+for (const name of ["HUBSPOT_TOKEN", "CRON_SECRET"]) {
+  const value = (process.env[name] ?? "").trim();
+  if (value.length >= 16) secrets.push([name, value]);
+}
+
 let scanned = 0;
 const leaks = [];
 for (const file of files(BUILD_DIR)) {
   scanned++;
-  if (readFileSync(file, "utf8").includes(key)) {
-    leaks.push(path.relative(process.cwd(), file));
+  const text = readFileSync(file, "utf8");
+  for (const [name, value] of secrets) {
+    if (text.includes(value)) leaks.push(`${name} in ${path.relative(process.cwd(), file)}`);
   }
 }
 
@@ -82,9 +94,10 @@ if (scanned === 0) {
 }
 
 if (leaks.length > 0) {
-  console.error(`check-bundle: FAIL — the service-role key is in ${leaks.length} build file(s):`);
+  console.error(`check-bundle: FAIL — a server-only secret is in ${leaks.length} build file(s):`);
   for (const f of leaks) console.error(`  ${f}`);
   process.exit(1);
 }
 
-console.log(`check-bundle: PASS — service-role key absent from all ${scanned} build files.`);
+const names = secrets.map(([name]) => name).join(", ");
+console.log(`check-bundle: PASS — ${names} absent from all ${scanned} build files.`);

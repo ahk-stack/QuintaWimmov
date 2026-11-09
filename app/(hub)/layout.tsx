@@ -3,6 +3,7 @@ import type { BellItem } from "@/components/notification-bell";
 import { SetupRequired } from "@/components/setup-required";
 import { requireUser } from "@/lib/auth/session";
 import { getStore, storeKind } from "@/lib/db";
+import { nudgeHubSpot } from "@/lib/hubspot/worker";
 
 /*
  * Request-time: it resolves the session and reads the roster. Kept in a route
@@ -30,6 +31,10 @@ export default async function HubLayout({
   }
 
   const { person: me } = await requireUser();
+
+  // Keeps the HubSpot queue moving with ordinary traffic (throttled, after the
+  // response). Retries and crashed-worker leases are picked up here too.
+  nudgeHubSpot();
   const store = getStore();
   const people = await store.listPeople();
 

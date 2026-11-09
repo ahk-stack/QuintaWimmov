@@ -28,6 +28,11 @@ if (!(env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim()) {
   env.SUPABASE_SERVICE_ROLE_KEY = `check-sentinel-${randomUUID()}-${randomUUID()}`;
   usingSentinel = true;
 }
+// The other server-only secrets get sentinels too, so the bundle check always
+// has something to look for — and HUBSPOT_TOKEN switches the sync code paths on.
+for (const name of ["HUBSPOT_TOKEN", "CRON_SECRET"]) {
+  if (!(env[name] ?? "").trim()) env[name] = `check-sentinel-${randomUUID()}-${randomUUID()}`;
+}
 // Without these, storeKind() is "unconfigured" and the build takes the
 // setup-screen bailout, so a leak on the configured path would never be built.
 // Placeholders only fill gaps; real values are never overridden.

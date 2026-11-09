@@ -9,7 +9,8 @@ import { supabaseStore, supabaseUrl } from "./supabase-store";
 
 export type {
   DataStore,
-  HubSpotResult,
+  HubSpotClaim,
+  HubSpotIds,
   LeadFilter,
   LeadPatch,
   NewLead,

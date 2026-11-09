@@ -15,12 +15,12 @@ runs on Quinta's own monochrome brand rather than Wimmov's blue.
 | **Chat** | Channels that update themselves, direct messages, @mentions, and a discussion thread on every lead. |
 | **News** | Quinta announcements feed. |
 | **Accounts** | Username and password sign-in. Only admins create users, set or reset sign-ins, and delete users. |
-| **HubSpot** | Planned: accepted leads pushed to HubSpot as contact + company + deal. |
+| **HubSpot** | Every new lead becomes a HubSpot **Lead** (with its contact, company and a note), starting as Sales Qualified Lead; owner and status changes follow it. One-way, app → HubSpot. |
 
 ## Stack
 
 Next.js 16 (App Router, Turbopack) · TypeScript · Tailwind CSS 4 ·
-Supabase Postgres · Vercel (for now) · HubSpot private app (planned)
+Supabase Postgres · Vercel (for now) · HubSpot private app
 
 ## Getting started
 

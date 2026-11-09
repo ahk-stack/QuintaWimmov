@@ -82,7 +82,16 @@ export const newLeadSchema = z.object({
   country: optionalText(120),
   rooms: optionalRoomCount,
   contactName: optionalText(160),
-  contactEmail: optionalEmail,
+  /*
+   * Required: the lead goes to HubSpot, where it must hang off a contact, and
+   * the email is the only safe way to find an existing one.
+   */
+  contactEmail: z
+    .string()
+    .trim()
+    .min(1, "Add the contact's email — HubSpot needs it")
+    .max(200)
+    .pipe(z.email("Enter a valid email address")),
   contactPhone: optionalText(60),
   productInterest: optionalText(80),
   context: optionalText(4000),

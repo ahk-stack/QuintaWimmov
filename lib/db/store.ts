@@ -1,5 +1,6 @@
 import type {
   AppNotification,
+  HubSpotErrorCode,
   Channel,
   Conversation,
   DirectMessage,
@@ -87,11 +88,20 @@ export interface NewNotification {
   preview?: string | null;
 }
 
-export interface HubSpotResult {
+/** A lead claimed by a HubSpot worker. Only the lease holder may record results. */
+export interface HubSpotClaim {
+  leadId: string;
+  leaseToken: string;
+  /** The revision being synced; later changes re-queue the lead. */
+  revision: number;
+}
+
+/** HubSpot objects created so far. Null leaves a stored id alone. */
+export interface HubSpotIds {
   contactId?: string | null;
   companyId?: string | null;
-  dealId?: string | null;
-  error?: string | null;
+  leadId?: string | null;
+  noteId?: string | null;
 }
 
 export interface DataStore {
@@ -112,7 +122,47 @@ export interface DataStore {
     patch: LeadPatch,
     actorId: string | null,
   ): Promise<Lead>;
-  recordHubSpotResult(id: string, result: HubSpotResult): Promise<Lead>;
+
+  // HubSpot sync queue (migration 0009) ---------------------------------------
+  // The queue state is set by the database in the same statement that creates
+  // or changes a lead; these only move it along.
+  /** Claims due leads with a lease. Expired leases are reclaimed. */
+  hubspotClaim(limit: number, leaseSeconds: number): Promise<HubSpotClaim[]>;
+  /** Queues a manual send or a retry. False when there is nothing to do. */
+  hubspotRequest(leadId: string): Promise<boolean>;
+  /** Stores HubSpot ids as soon as they exist. False if the lease was lost. */
+  hubspotSaveIds(leadId: string, leaseToken: string, ids: HubSpotIds): Promise<boolean>;
+  hubspotComplete(
+    leadId: string,
+    leaseToken: string,
+    revision: number,
+    warning: HubSpotErrorCode | null,
+  ): Promise<boolean>;
+  hubspotFail(
+    leadId: string,
+    leaseToken: string,
+    code: HubSpotErrorCode,
+    options: { retryable: boolean; blocked: boolean },
+  ): Promise<boolean>;
+  /** The saved HubSpot note id, which the Lead type does not carry. */
+  hubspotNoteId(leadId: string): Promise<string | null>;
+  /**
+   * Extends a live lease. False means it expired (and may have been
+   * reclaimed): the caller must stop before writing anything to HubSpot.
+   */
+  hubspotRenew(leadId: string, leaseToken: string, seconds: number): Promise<boolean>;
+  /**
+   * Domain registry, so two workers never both create one company. Returns the
+   * known company id, or `mine` when the caller should find or create it, or
+   * neither when another worker is creating it right now.
+   */
+  hubspotClaimCompany(
+    domain: string,
+    token: string,
+  ): Promise<{ companyId: string | null; mine: boolean; uncertain: boolean }>;
+  hubspotSetCompany(domain: string, token: string, companyId: string): Promise<boolean>;
+  /** A create's answer was lost: from now on only search for it, never create. */
+  hubspotMarkCompanyUncertain(domain: string, token: string): Promise<boolean>;
 
   listLeadEvents(leadId: string): Promise<LeadEvent[]>;
   listLeadComments(leadId: string): Promise<LeadComment[]>;

@@ -18,8 +18,40 @@ export type LeadStatus = "new" | "claimed" | "in_progress" | "won" | "lost";
 
 export type LeadPriority = "low" | "normal" | "high";
 
-/** State of the push to HubSpot. `idle` means no attempt has been made. */
-export type HubSpotSyncState = "idle" | "synced" | "failed";
+/**
+ * Where a lead stands with HubSpot. Mirrors `hubspot_sync_state` (migration
+ * 0009): `manual` leads predate the sync and are sent only on request.
+ */
+export type HubSpotSyncState =
+  | "manual"
+  | "pending"
+  | "running"
+  | "retry"
+  | "synced"
+  | "blocked"
+  | "failed";
+
+/**
+ * Why a sync failed, or a caveat on one that succeeded. Fixed codes only:
+ * HubSpot's own messages quote contact emails and phones, so they are never
+ * stored, logged or shown. The UI maps each code to fixed text. The database
+ * CHECK in migration 0009 lists exactly these; change both together.
+ */
+export type HubSpotErrorCode =
+  | "no_contact"
+  | "not_configured"
+  | "owner_unmapped"
+  | "company_busy"
+  | "hubspot:auth"
+  | "hubspot:scope"
+  | "hubspot:validation"
+  | "hubspot:not_found"
+  | "hubspot:rate_limited"
+  | "hubspot:server"
+  | "hubspot:timeout"
+  | "hubspot:network"
+  | "hubspot:unexpected"
+  | "internal";
 
 export interface Person {
   id: string;
@@ -60,16 +92,12 @@ export interface Lead {
 
   hubspotContactId: string | null;
   hubspotCompanyId: string | null;
-  hubspotDealId: string | null;
+  /** The HubSpot Lead (object 0-136) this lead became. */
+  hubspotLeadId: string | null;
   hubspotSyncedAt: string | null;
-  /**
-   * Diagnostic only, and never safe to render.
-   *
-   * HubSpot rejection messages quote the offending request, which for these
-   * calls means the prospect's email or phone. Any UI must show a generic
-   * failure instead, and whatever writes this must sanitise before storing.
-   */
-  hubspotSyncError: string | null;
+  hubspotSyncState: HubSpotSyncState;
+  /** A fixed code, never a HubSpot message. See HubSpotErrorCode. */
+  hubspotSyncError: HubSpotErrorCode | null;
 }
 
 /** Append-only audit trail. Renders as the timeline on the lead detail page. */
@@ -170,9 +198,3 @@ export interface NewsItem {
   pinned: boolean;
 }
 
-/** Derived view of a lead's HubSpot state, so the UI has one thing to switch on. */
-export function hubspotSyncState(lead: Lead): HubSpotSyncState {
-  if (lead.hubspotSyncError) return "failed";
-  if (lead.hubspotSyncedAt) return "synced";
-  return "idle";
-}
